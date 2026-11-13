@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AvatarStatus, EchoError, EchoErrorCode, ChatApiResponse } from '@/types/echo';
 import { InventoryService } from '@/lib/inventory/service';
 import { parseToolArgs, runGetInventory } from '@/lib/ai/tools';
+import { fetchWeather, getBrowserLocation } from '@/lib/ai/weather';
 import { generateId } from '@/lib/utils';
 
 /**
@@ -286,20 +287,23 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
           const output: any[] = evt.response?.output ?? [];
           const calls = output.filter((o) => o.type === 'function_call' && !handledCalls.current.has(o.call_id));
           if (calls.length) {
-            for (const c of calls) {
-              handledCalls.current.add(c.call_id);
-              // Tool reads the PERSISTED store right now — this is what makes fresh-session recall work.
-              const result =
-                c.name === 'get_inventory'
-                  ? runGetInventory(InventoryService.list(), parseToolArgs(c.arguments))
-                  : { error: `Unknown tool ${c.name}` };
-              sendEvent({
-                type: 'conversation.item.create',
-                item: { type: 'function_call_output', call_id: c.call_id, output: JSON.stringify(result) },
-              });
-            }
-            sendEvent({ type: 'response.create' });
             setStatus('thinking');
+            calls.forEach((c) => handledCalls.current.add(c.call_id));
+            void Promise.all(
+              calls.map(async (c) => {
+                // Inventory tool reads the PERSISTED store right now — this makes fresh-session recall work.
+                const result =
+                  c.name === 'get_inventory'
+                    ? runGetInventory(InventoryService.list(), parseToolArgs(c.arguments))
+                    : c.name === 'get_weather'
+                      ? await fetchWeather(await getBrowserLocation())
+                      : { error: `Unknown tool ${c.name}` };
+                sendEvent({
+                  type: 'conversation.item.create',
+                  item: { type: 'function_call_output', call_id: c.call_id, output: JSON.stringify(result) },
+                });
+              })
+            ).then(() => sendEvent({ type: 'response.create' }));
           } else if (evt.response?.status === 'failed') {
             fail(err('provider_error', evt.response?.status_details?.error?.message ?? 'ECHO could not answer. Try again.'));
           } else if (statusRef.current === 'thinking') {

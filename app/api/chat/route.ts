@@ -29,6 +29,7 @@ export async function POST(req: NextRequest) {
       message: body.message.trim().slice(0, 2000),
       history: Array.isArray(body.history) ? body.history : [],
       inventory: Array.isArray(body.inventorySnapshot) ? body.inventorySnapshot : [],
+      location: body.currentLocation,
     });
     return NextResponse.json<ChatApiResponse & { toolCalls: string[]; mock: boolean }>({
       success: true,

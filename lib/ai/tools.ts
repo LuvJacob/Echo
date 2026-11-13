@@ -26,7 +26,16 @@ export const GET_INVENTORY_TOOL = {
   },
 } as const;
 
-export const ECHO_TOOLS = [GET_INVENTORY_TOOL];
+export const GET_WEATHER_TOOL = {
+  type: 'function',
+  name: 'get_weather',
+  description:
+    'Get LIVE current weather and today\'s forecast where the survivor is (real data, not part of the fictional scenario). ' +
+    'Call this for any question about weather, temperature, rain, wind or whether conditions are safe to travel.',
+  parameters: { type: 'object', additionalProperties: false, properties: {}, required: [] },
+} as const;
+
+export const ECHO_TOOLS = [GET_INVENTORY_TOOL, GET_WEATHER_TOOL];
 
 export interface InventoryToolOutput {
   items: {
