@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import { useCameraCapture } from '@/hooks/useCameraCapture';
 import { Card, Button, Badge } from '@/components/ui';
 import type { UseSupplyScan } from '@/hooks/useSupplyScan';
 import type { FillLevel } from '@/types/echo';
@@ -41,6 +42,12 @@ export function PhotoUploadModal({ isOpen, onClose, scan }: PhotoUploadModalProp
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [savedLiters, setSavedLiters] = useState<number | null>(null);
   const [confirmError, setConfirmError] = useState<string | null>(null);
+  const camera = useCameraCapture();
+
+  // Turn the webcam off whenever the modal closes.
+  useEffect(() => {
+    if (!isOpen) camera.stop();
+  }, [isOpen, camera.stop]);
 
   useEffect(() => {
     return () => {
@@ -56,7 +63,22 @@ export function PhotoUploadModal({ isOpen, onClose, scan }: PhotoUploadModalProp
     !!proposal && (status === 'review' || status === 'error' || status === 'saving');
   const showSavedBanner = savedLiters !== null;
   const showErrorNoProposal = status === 'error' && !proposal;
-  const showPicker = !isScanning && !showReview && !showSavedBanner && !showErrorNoProposal;
+  const showPicker = !isScanning && !showReview && !showSavedBanner && !showErrorNoProposal && !camera.active;
+  const showCamera = camera.active && !isScanning && !showReview;
+
+  const openCamera = async () => {
+    const ok = await camera.start();
+    // No usable camera API (e.g. phone over plain http) → native camera/file picker.
+    if (!ok && !navigator.mediaDevices?.getUserMedia) cameraRef.current?.click();
+  };
+
+  const snap = () => {
+    const url = camera.capture();
+    if (url) {
+      setConfirmError(null);
+      void scan.scanPhoto(url);
+    }
+  };
   const isSaving = status === 'saving';
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -69,6 +91,7 @@ export function PhotoUploadModal({ isOpen, onClose, scan }: PhotoUploadModalProp
   };
 
   const handleClose = () => {
+    camera.stop();
     if (timerRef.current) clearTimeout(timerRef.current);
     setSavedLiters(null);
     setConfirmError(null);
@@ -158,10 +181,11 @@ export function PhotoUploadModal({ isOpen, onClose, scan }: PhotoUploadModalProp
                   type="button"
                   variant="primary"
                   size="md"
-                  onClick={() => cameraRef.current?.click()}
+                  onClick={openCamera}
+                  disabled={camera.starting}
                   className="text-xs font-bold"
                 >
-                  <Camera className="w-4 h-4 mr-1.5" />
+                  {camera.starting ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Camera className="w-4 h-4 mr-1.5" />}
                   Take photo
                 </Button>
                 <Button
@@ -175,6 +199,32 @@ export function PhotoUploadModal({ isOpen, onClose, scan }: PhotoUploadModalProp
                   Upload image
                 </Button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {camera.error && showPicker && (
+          <div className="mb-3 rounded-lg border border-echo-amber/50 bg-echo-amber/10 p-2.5 text-[11px] font-mono text-echo-amber">
+            {camera.error.message}
+          </div>
+        )}
+
+        {/* Live camera viewfinder */}
+        {showCamera && (
+          <div className="mb-3 rounded-xl border border-echo-cyan/40 bg-black relative overflow-hidden">
+            <video ref={camera.videoRef} playsInline muted autoPlay className="w-full max-h-[55vh] object-contain" />
+            <div className="pointer-events-none absolute top-2 left-2 w-5 h-5 border-t-2 border-l-2 border-echo-cyan" />
+            <div className="pointer-events-none absolute top-2 right-2 w-5 h-5 border-t-2 border-r-2 border-echo-cyan" />
+            <div className="pointer-events-none absolute bottom-14 left-2 w-5 h-5 border-b-2 border-l-2 border-echo-cyan" />
+            <div className="pointer-events-none absolute bottom-14 right-2 w-5 h-5 border-b-2 border-r-2 border-echo-cyan" />
+            <div className="absolute inset-x-0 bottom-0 flex justify-center gap-2 bg-black/60 p-2">
+              <Button type="button" variant="ghost" size="sm" onClick={camera.stop}>
+                Cancel
+              </Button>
+              <Button type="button" variant="primary" size="md" onClick={snap} className="px-6 font-bold">
+                <Camera className="w-4 h-4 mr-1.5" />
+                Capture &amp; Scan
+              </Button>
             </div>
           </div>
         )}
