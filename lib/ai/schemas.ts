@@ -22,7 +22,7 @@ export const VISION_JSON_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['name', 'category', 'quantity', 'unit', 'unit_volume_ml', 'water_appearance', 'water_size', 'observations', 'confidence'],
+        required: ['name', 'category', 'quantity', 'unit', 'unit_volume_ml', 'contains_visible_liquid', 'certain', 'water_appearance', 'water_size', 'observations', 'confidence'],
         properties: {
           name: { type: 'string' },
           category: { type: 'string', enum: ITEM_CATEGORIES },
@@ -32,6 +32,8 @@ export const VISION_JSON_SCHEMA = {
             type: ['number', 'null'],
             description: 'Capacity of ONE unit in mL ONLY if a label is legible; otherwise null. Never guess.',
           },
+          contains_visible_liquid: { type: 'boolean', description: 'true ONLY if liquid is visible inside a transparent container.' },
+          certain: { type: 'boolean', description: 'true only if you are confident what this object is.' },
           water_appearance: {
             type: 'string',
             enum: ['clear', 'cloudy_or_discolored', 'not_applicable'],
@@ -60,6 +62,8 @@ export interface ParsedVision {
   items: ProposedItem[];
   uncertaintyNotes: string[];
 }
+
+export const UNKNOWN_ITEM_NAME = 'Unknown item';
 
 export const DRINKABILITY_NOTE =
   'Drinkability is undetermined: a photo cannot show whether water is safe. Treat or test before drinking.';
@@ -127,6 +131,23 @@ export function parseVisionOutput(raw: unknown): EchoResult<ParsedVision> {
     }
     if (it.category === 'water') hadWater = true;
 
+    // Guardrail: water must show liquid; uncertain objects become "Unknown item" and ECHO asks the survivor.
+    const unsure = it.certain === false || (it.category === 'water' && it.contains_visible_liquid === false);
+    if (unsure) {
+      items.push({
+        name: UNKNOWN_ITEM_NAME,
+        category: 'other',
+        quantity: it.quantity as number,
+        unit: 'items',
+        unitVolumeMl: null,
+        fillLevel: null,
+        location: null,
+        observations,
+        drinkability: 'undetermined',
+        confidence: it.confidence,
+      });
+      continue;
+    }
     const isWater = it.category === 'water';
     // Team rule: assume capacity from the size chart when the label isn't legible; count as full.
     const assumedMl = isWater && vol == null ? WATER_SIZE_ML[size === 'not_applicable' ? 'standard' : size] : null;

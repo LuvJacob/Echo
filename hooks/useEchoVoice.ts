@@ -64,7 +64,7 @@ export interface EchoVoice {
   /** Give ECHO context (e.g. "photo scan proposed 3 bottles"); optionally have it respond aloud. */
   notify: (text: string, opts?: { respond?: boolean }) => void;
   /** ECHO speaks this exact short line (e.g. "Water bottle added."). Queued if ECHO is mid-reply. */
-  say: (text: string) => void;
+  say: (text: string, opts?: { urgent?: boolean }) => void;
   /** ECHO asks this question in-conversation (so it understands the spoken answer). `context` is hidden guidance. */
   ask: (question: string, context?: string) => void;
   /** Retry audio after an autoplay block ('playback_failed'). Call from a tap. */
@@ -131,7 +131,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
   const connectingRef = useRef<Promise<void> | null>(null);
   const handledCalls = useRef(new Set<string>());
   const responseActiveRef = useRef(false);
-  const sayQueueRef = useRef<string[]>([]);
+  const sayQueueRef = useRef<{ text: string; urgent?: boolean }[]>([]);
   /** Hands-free answer window after ECHO asks a question (no button needed). */
   const awaitingAnswerRef = useRef(false);
   const handsFreeRef = useRef(false);
@@ -294,14 +294,15 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
   };
 
   /** Out-of-band response: spoken but not added to the conversation history. */
-  const sendSay = (text: string) => {
+  const sendSay = (text: string, urgent?: boolean) => {
     responseActiveRef.current = true;
+    const tone = urgent ? ' Speak with urgency: firm, serious and alarmed, like a safety alarm — clear and slightly faster, stressing the words DO NOT DRINK.' : ' Calm, steady tone.';
     sendEvent({
       type: 'response.create',
       response: {
         conversation: 'none',
         output_modalities: ['audio'],
-        instructions: `Say exactly this, in your normal voice, and nothing else: "${text.replace(/"/g, "'")}"`,
+        instructions: `Say exactly this and nothing else: "${text.replace(/"/g, "'")}".${tone}`,
       },
     });
   };
@@ -354,7 +355,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
         case 'response.done': {
           responseActiveRef.current = false;
           const queued = sayQueueRef.current.shift();
-          if (queued) sendSay(queued);
+          if (queued) sendSay(queued.text, queued.urgent);
           const output: any[] = evt.response?.output ?? [];
           const calls = output.filter((o) => o.type === 'function_call' && !handledCalls.current.has(o.call_id));
           if (calls.length) {
@@ -563,14 +564,14 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
 
   // ---------- pipeline helpers ----------
   const speakPipeline = useCallback(
-    async (text: string) => {
+    async (text: string, urgent?: boolean) => {
       const el = ensureAudio();
       setStatus('speaking');
       try {
         const res = await fetch('/api/voice', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ textToSpeak: text }),
+          body: JSON.stringify({ textToSpeak: text, ...(urgent ? { tone: 'urgent' } : {}) }),
         });
         if (!res.ok || !res.headers.get('content-type')?.includes('audio')) throw new Error(`tts ${res.status}`);
         const url = URL.createObjectURL(await res.blob());
@@ -812,17 +813,17 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
   );
 
   const say = useCallback(
-    async (text: string) => {
+    async (text: string, opts: { urgent?: boolean } = {}) => {
       // Connect the live session first so confirmations use ECHO's real voice.
       if (statusRef.current === 'disconnected' || statusRef.current === 'error') await connect();
       if (modeRef.current === 'realtime' && dcRef.current?.readyState === 'open') {
-        if (responseActiveRef.current || statusRef.current === 'listening') sayQueueRef.current.push(text);
-        else sendSay(text);
+        if (responseActiveRef.current || statusRef.current === 'listening') sayQueueRef.current.push({ text, urgent: opts.urgent });
+        else sendSay(text, opts.urgent);
         return;
       }
       // Pipeline or not connected yet: server TTS (falls back to browser speech).
       upsertCaption(generateId('cap'), 'assistant', text, true);
-      void speakPipeline(text);
+      void speakPipeline(text, opts.urgent);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [connect, speakPipeline, upsertCaption]

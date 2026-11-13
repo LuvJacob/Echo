@@ -33,11 +33,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, transcription });
     }
 
-    const body = (await req.json()) as { textToSpeak?: string };
+    const body = (await req.json()) as { textToSpeak?: string; tone?: 'urgent' };
     if (!body.textToSpeak?.trim()) {
       return NextResponse.json({ success: false, errorCode: 'invalid_request', error: 'Nothing to speak.' }, { status: 400 });
     }
-    const mp3 = await synthesizeSpeech(body.textToSpeak.trim());
+    const mp3 = await synthesizeSpeech(body.textToSpeak.trim(), body.tone === 'urgent' ? 'urgent' : undefined);
     return new NextResponse(mp3, { headers: { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store' } });
   } catch (e) {
     console.error('[API /api/voice]', e);

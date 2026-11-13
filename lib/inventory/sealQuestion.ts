@@ -44,6 +44,13 @@ export function setPendingUnknownQuestion(): boolean {
 
 const CATS = ['water', 'food', 'medical', 'tool', 'other'] as const;
 
+type Resolver = (name: string, category: (typeof CATS)[number]) => void;
+let resolver: Resolver | null = null;
+/** Photo review: route the spoken answer into the open proposal instead of saving directly. */
+export function setUnknownResolver(fn: Resolver | null) {
+  resolver = fn;
+}
+
 /** Tool: add_scanned_item — the survivor said what the unknown object is. */
 export function answerUnknownItem(args: unknown): Record<string, unknown> {
   const a = (args ?? {}) as { name?: unknown; category?: unknown };
@@ -52,6 +59,12 @@ export function answerUnknownItem(args: unknown): Record<string, unknown> {
   unknownPending = false;
   if (!name) return { ok: false, message: 'No item name was given.' };
   const nice = name[0].toUpperCase() + name.slice(1);
+  if (resolver) {
+    const r = resolver;
+    resolver = null;
+    r(nice, category);
+    return { ok: true, updated_in_review: nice, note: 'Filled into the photo review. The survivor still taps Confirm & Save.' };
+  }
   const r = inventoryStore.applyAction({
     type: 'inventory_update',
     operation: 'add',

@@ -86,7 +86,10 @@ export function useLiveScan(opts: {
       }
       setError(null);
 
-      const detections = (data.items as LiveDetection[]).filter((d) => d.confidence >= MIN_CONFIDENCE);
+      const detections = (data.items as LiveDetection[])
+        .filter((d) => d.confidence >= MIN_CONFIDENCE)
+        // Low-confidence water → ask instead of guessing.
+        .map((d) => (d.kind === 'water_bottle' && d.confidence < 0.85 ? { ...d, kind: 'unknown_item' as const } : d));
       const seen = new Map<string, LiveDetection>();
       for (const d of detections) seen.set(specFor(d).key, d);
       setInView([...seen.values()].map((d) => specFor(d).name));

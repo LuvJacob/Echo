@@ -21,10 +21,13 @@ const SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['kind', 'name', 'water_appearance', 'water_size', 'label_ml', 'confidence'],
+        required: ['kind', 'name', 'looks_like', 'contains_visible_liquid', 'certain', 'water_appearance', 'water_size', 'label_ml', 'confidence'],
         properties: {
           kind: { type: 'string', enum: KINDS },
-          name: { type: 'string', description: 'Short item name, e.g. "Gauze pads" (only matters for first_aid_other).' },
+          name: { type: 'string', description: 'Short item name, e.g. "Gauze pads" or "Bread".' },
+          looks_like: { type: 'string', description: 'Plain description of the object, e.g. "loaf of bread in a plastic bag".' },
+          contains_visible_liquid: { type: 'boolean', description: 'true ONLY if you can see liquid inside a transparent container.' },
+          certain: { type: 'boolean', description: 'true only if you are confident what this object is.' },
           water_appearance: { type: 'string', enum: APPEARANCES },
           water_size: { type: 'string', enum: SIZES },
           label_ml: { type: ['number', 'null'], description: 'Capacity printed on the label in mL, only if legible.' },
@@ -55,6 +58,8 @@ For everything else "not_applicable".
 water_size (water only, else "not_applicable"): "small" = 8–12 oz mini bottle; "standard" = ordinary single-serve
 bottle (16.9–20 oz, the usual "bottle of water"); "large" = 1–1.5 L bottle; "gallon_jug" = big jug with a handle.
 label_ml: the capacity printed on the label in mL if you can read it (1 gallon = 3785), else null.
+First describe the object in looks_like, THEN pick the kind. A plastic bag, wrapper or box is NOT a water bottle.
+Set certain=false whenever you are not sure; the app will ask the survivor instead of guessing.
 If nothing on the list is visible, return an empty items array.
 `.trim();
 
@@ -121,6 +126,11 @@ function parseLive(raw: string): LiveDetection[] | null {
     if (typeof o.name !== 'string' || typeof o.confidence !== 'number') return null;
     if (!SIZES.includes(o.water_size as WaterSize)) return null;
     if (o.label_ml !== null && typeof o.label_ml !== 'number') return null;
+    // Guardrail: water must show liquid; anything uncertain is asked about instead of guessed.
+    let kind = o.kind as LiveKind;
+    if (o.certain !== true) kind = 'unknown_item';
+    if (kind === 'water_bottle' && o.contains_visible_liquid !== true) kind = 'unknown_item';
+    o.kind = kind;
     out.push({
       kind: o.kind as LiveKind,
       name: o.name,

@@ -1,4 +1,5 @@
 'use client';
+import { WaterSafetyText } from '@/components/inventory/WaterSafetyText';
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useCameraCapture } from '@/hooks/useCameraCapture';
@@ -338,7 +339,7 @@ export function PhotoUploadModal({ isOpen, onClose, scan, onLiveAdded, voiceList
                               : 'border-echo-emerald/50 bg-echo-emerald/10 text-echo-emerald'
                         }`}
                       >
-                        {WATER_SAFETY_LABEL[a.waterSafety]}
+                        <WaterSafetyText safety={a.waterSafety} />
                       </span>
                     )}
                   </li>
@@ -500,7 +501,7 @@ export function PhotoUploadModal({ isOpen, onClose, scan, onLiveAdded, voiceList
                       }`}
                     >
                       <Droplet className="w-3.5 h-3.5 shrink-0" />
-                      {WATER_SAFETY_LABEL[item.waterSafety]}
+                      <WaterSafetyText safety={item.waterSafety} />
                     </div>
                   )}
 

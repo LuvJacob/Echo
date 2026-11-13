@@ -17,7 +17,8 @@ import { useEchoVoice } from '@/hooks/useEchoVoice';
 import { useSupplyScan } from '@/hooks/useSupplyScan';
 import { ChatMessage, AvatarStatus, InventoryItem } from '@/types/echo';
 import { confirmationPhrase } from '@/lib/inventory/live';
-import { setPendingSealQuestion, setPendingUnknownQuestion } from '@/lib/inventory/sealQuestion';
+import { setPendingSealQuestion, setPendingUnknownQuestion, setUnknownResolver } from '@/lib/inventory/sealQuestion';
+import { UNKNOWN_ITEM_NAME } from '@/lib/ai/schemas';
 import { getUserName, greetingFor } from '@/lib/memory/profile';
 import { InventoryService } from '@/lib/inventory/service';
 
@@ -42,7 +43,7 @@ export default function HomePage() {
       const bad = p.items.find((i) => i.category === 'water' && i.waterSafety === 'possible_contamination');
       const clear = p.items.find((i) => i.category === 'water' && i.waterSafety === 'safety_unknown');
       if (bad) {
-        void voice.say(`${bad.name} saved. Contaminated — do not drink it.`);
+        void voice.say(`Warning! ${bad.name} looks contaminated. Do not drink it.`, { urgent: true });
       } else if (clear) {
         setPendingSealQuestion({ id: p.id, name: clear.name, category: 'water', categoryLabel: 'Water', unitVolumeMl: clear.unitVolumeMl ?? undefined, waterSafety: 'safety_unknown', at: Date.now() });
         void voice.ask(
@@ -52,6 +53,22 @@ export default function HomePage() {
       }
     },
   });
+
+  // ---- Photo review: ask out loud about anything the AI couldn't identify ----
+  const askedProposalRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    const p = scan.proposal;
+    if (scan.status !== 'review' || !p || askedProposalRef.current === p.id) return;
+    const idx = p.items.findIndex((i) => i.name === UNKNOWN_ITEM_NAME);
+    if (idx < 0) return;
+    askedProposalRef.current = p.id;
+    setUnknownResolver((name, category) => scan.updateItem(idx, { name, category }));
+    void voice.ask(
+      "I'm not sure what that is. What is this item?",
+      'A photo scan found an object it could not identify. You asked what it is. When the survivor answers, call add_scanned_item with a short name and the best category.'
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scan.status, scan.proposal]);
 
   // ---- Greeting by name (remembered in this browser) ----
   const [userName, setUserNameState] = useState<string | null>(null);
@@ -289,6 +306,8 @@ export default function HomePage() {
               `${e.name} added. Is it unopened and factory-sealed?`,
               `Live scan just added one "${e.name}" (${e.unitVolumeMl ?? '?'} mL). You are asking whether it is unopened and factory-sealed. When the survivor answers, call set_water_sealed with their answer.`
             );
+          } else if (e.waterSafety === 'possible_contamination') {
+            void voice.say(`Warning! ${e.name} looks contaminated. Do not drink it.`, { urgent: true });
           } else {
             void voice.say(confirmationPhrase(e));
           }

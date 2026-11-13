@@ -89,7 +89,7 @@ export async function transcribeAudio(file: Blob, filename: string): Promise<str
   return (json.text ?? '').trim();
 }
 
-export async function synthesizeSpeech(text: string): Promise<ArrayBuffer> {
+export async function synthesizeSpeech(text: string, tone?: 'urgent'): Promise<ArrayBuffer> {
   const res = await call('/audio/speech', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -98,7 +98,10 @@ export async function synthesizeSpeech(text: string): Promise<ArrayBuffer> {
       voice: MODELS.ttsVoice,
       input: text.slice(0, 4000),
       response_format: 'mp3',
-      instructions: 'Calm, precise, protective AI companion. Slightly synthetic. Brisk pace.',
+      instructions:
+        tone === 'urgent'
+          ? 'Speak with urgency: firm, serious and alarmed, like a safety alarm — clear and slightly faster, stressing the words DO NOT DRINK.'
+          : 'Calm, precise, protective AI companion. Slightly synthetic. Brisk pace.',
     }),
   });
   return res.arrayBuffer();
