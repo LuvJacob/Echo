@@ -90,10 +90,8 @@ function mockChat(message: string, inventory: InventoryItem[]): AiChatResult {
   } else {
     const places = [...new Set(water.map((w) => w.location).filter(Boolean))];
     const where = places.length ? ` in ${places.join(' and ')}` : '';
-    const unknown = inv.totals.water_containers_unknown_volume;
-    reply =
-      `You have ${inv.totals.water_liters_spoken} of water across ${inv.totals.water_containers} containers${where}.` +
-      (unknown ? ` ${unknown} have unknown volume and aren't counted.` : '');
+    const bad = inv.totals.unsafe_water_containers;
+    reply = `You have ${inv.totals.water_spoken}${where}.` + (bad ? ` ${bad} flagged do not drink.` : '');
   }
   return { reply: `[offline mode] ${reply}`, speechText: reply, toolCalls: ['get_inventory'], mock: true };
 }
