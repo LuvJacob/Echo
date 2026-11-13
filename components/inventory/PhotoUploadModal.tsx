@@ -1,4 +1,5 @@
 'use client';
+import { WaterSafetyText } from '@/components/inventory/WaterSafetyText';
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useCameraCapture } from '@/hooks/useCameraCapture';
@@ -28,6 +29,8 @@ interface PhotoUploadModalProps {
   voiceListening?: boolean;
   /** [Person B] ECHO's latest spoken line, shown as a caption inside the scanner. */
   voiceCaption?: string;
+  /** [Person B] Live scan saw something it can't identify → page asks the survivor by voice. */
+  onLiveUnknown?: () => void;
 }
 
 const FILL_OPTIONS: { value: FillLevel | ''; label: string }[] = [
@@ -43,7 +46,7 @@ const inputCls =
   'w-full bg-echo-bg border border-echo-border rounded-md px-2 py-1.5 text-base sm:text-xs font-mono text-white focus:outline-none focus:border-echo-cyan';
 const labelCls = 'block text-[10px] font-mono text-echo-muted uppercase mb-1';
 
-export function PhotoUploadModal({ isOpen, onClose, scan, onLiveAdded, voiceListening, voiceCaption }: PhotoUploadModalProps) {
+export function PhotoUploadModal({ isOpen, onClose, scan, onLiveAdded, voiceListening, voiceCaption, onLiveUnknown }: PhotoUploadModalProps) {
   const cameraRef = useRef<HTMLInputElement | null>(null);
   const uploadRef = useRef<HTMLInputElement | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -54,6 +57,7 @@ export function PhotoUploadModal({ isOpen, onClose, scan, onLiveAdded, voiceList
   const live = useLiveScan({
     grabFrame: () => camera.grabFrame(640),
     onAdded: (e) => onLiveAdded?.(e),
+    onUnknown: () => onLiveUnknown?.(),
   });
   const liveStart = live.start;
   const liveStop = live.stop;
@@ -335,7 +339,7 @@ export function PhotoUploadModal({ isOpen, onClose, scan, onLiveAdded, voiceList
                               : 'border-echo-emerald/50 bg-echo-emerald/10 text-echo-emerald'
                         }`}
                       >
-                        {WATER_SAFETY_LABEL[a.waterSafety]}
+                        <WaterSafetyText safety={a.waterSafety} />
                       </span>
                     )}
                   </li>
@@ -474,69 +478,30 @@ export function PhotoUploadModal({ isOpen, onClose, scan, onLiveAdded, voiceList
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <div>
-                      <label className={labelCls}>Capacity each (mL)</label>
-                      <input
-                        type="number"
-                        min={1}
-                        step="any"
-                        inputMode="decimal"
-                        placeholder="unknown"
-                        value={item.unitVolumeMl ?? ''}
-                        disabled={isSaving}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          scan.updateItem(i, { unitVolumeMl: v === '' ? null : Number(v) });
-                        }}
-                        className={inputCls}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelCls}>Fill level</label>
-                      <select
-                        value={item.fillLevel ?? ''}
-                        disabled={isSaving}
-                        onChange={(e) =>
-                          scan.updateItem(i, {
-                            fillLevel: e.target.value === '' ? null : (e.target.value as FillLevel),
-                          })
-                        }
-                        className={inputCls}
-                      >
-                        {FILL_OPTIONS.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className={labelCls}>Location</label>
-                      <input
-                        type="text"
-                        placeholder="e.g. locker seven"
-                        value={item.location ?? ''}
-                        disabled={isSaving}
-                        onChange={(e) =>
-                          scan.updateItem(i, { location: e.target.value === '' ? null : e.target.value })
-                        }
-                        className={inputCls}
-                      />
-                    </div>
+                  <div>
+                    <label className={labelCls}>Location (optional)</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. locker seven"
+                      value={item.location ?? ''}
+                      disabled={isSaving}
+                      onChange={(e) => scan.updateItem(i, { location: e.target.value === '' ? null : e.target.value })}
+                      className={inputCls}
+                    />
                   </div>
 
-                  {isWater && (
-                    <div className="text-[10px] font-mono text-echo-muted flex items-start gap-1.5">
-                      <Droplet className="w-3.5 h-3.5 text-echo-cyan shrink-0" />
-                      <div className="space-y-0.5">
-                        <div>Drinkability: undetermined — test or treat before drinking</div>
-                        {unknownWater && (
-                          <div className="text-echo-amber">
-                            Unknown capacity/fill won&apos;t count toward litres.
-                          </div>
-                        )}
-                      </div>
+                  {isWater && item.waterSafety && (
+                    <div
+                      className={`flex items-center gap-1.5 rounded-lg border p-2 text-[11px] font-mono font-bold ${
+                        item.waterSafety === 'possible_contamination'
+                          ? 'border-echo-rose/60 bg-echo-rose/15 text-echo-rose'
+                          : item.waterSafety === 'preferred'
+                            ? 'border-echo-emerald/60 bg-echo-emerald/15 text-echo-emerald'
+                            : 'border-echo-amber/60 bg-echo-amber/10 text-echo-amber'
+                      }`}
+                    >
+                      <Droplet className="w-3.5 h-3.5 shrink-0" />
+                      <WaterSafetyText safety={item.waterSafety} />
                     </div>
                   )}
 
@@ -555,17 +520,6 @@ export function PhotoUploadModal({ isOpen, onClose, scan, onLiveAdded, voiceList
               );
             })}
 
-            {proposal.uncertaintyNotes.length > 0 && (
-              <div className="bg-echo-amber/10 border border-echo-amber/30 p-2.5 rounded-lg text-[10px] font-mono text-echo-amber space-y-1">
-                <div className="font-bold flex items-center gap-1 text-[11px]">
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                  <span>SENSOR UNCERTAINTY:</span>
-                </div>
-                {proposal.uncertaintyNotes.map((note, i) => (
-                  <div key={i}>• {note}</div>
-                ))}
-              </div>
-            )}
 
             {confirmError && (
               <div className="bg-echo-rose/15 border border-echo-rose/50 p-2.5 rounded-lg text-xs font-mono text-echo-rose">

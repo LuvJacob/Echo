@@ -14,7 +14,7 @@ test('valid output passes with nulls and undetermined drinkability', () => {
   const r = parseVisionOutput(out());
   assert.ok(r.ok);
   const it = r.value.items[0];
-  assert.equal(it.fillLevel, null);
+  assert.equal(it.fillLevel, 'full'); // team rule: water assumed full
   assert.equal(it.location, null);
   assert.equal(it.drinkability, 'undetermined');
   assert.equal(it.quantity, 3);
@@ -24,7 +24,7 @@ test('valid output passes with nulls and undetermined drinkability', () => {
 test('accepts JSON string input and null volume', () => {
   const r = parseVisionOutput(JSON.stringify(out([item({ unit_volume_ml: null })])));
   assert.ok(r.ok);
-  assert.equal(r.value.items[0].unitVolumeMl, null);
+  assert.equal(r.value.items[0].unitVolumeMl, 500); // team rule: unknown water size → standard 500 mL
 });
 
 test('water adds DRINKABILITY_NOTE; non-water does not', () => {
@@ -60,3 +60,26 @@ for (const [name, input] of malformed) {
     assert.equal(r.error.code, 'invalid_model_output');
   });
 }
+
+test('red / tinted water from a photo is flagged contaminated', () => {
+  const r = parseVisionOutput({
+    summary: 'bottle of red liquid',
+    items: [{ name: 'Bottle', category: 'water', quantity: 1, unit: 'bottles', unit_volume_ml: null, water_appearance: 'cloudy_or_discolored', water_size: 'standard', observations: ['Liquid is red'], confidence: 0.9 }],
+    uncertainty_notes: [],
+  });
+  assert.ok(r.ok);
+  if (r.ok) assert.equal(r.value.items[0].waterSafety, 'possible_contamination');
+});
+
+test('clear water from a photo → test before drinking', () => {
+  const r = parseVisionOutput({
+    summary: 'clear bottle',
+    items: [{ name: 'Bottle', category: 'water', quantity: 1, unit: 'bottles', unit_volume_ml: null, water_appearance: 'clear', water_size: 'gallon_jug', observations: [], confidence: 0.9 }],
+    uncertainty_notes: [],
+  });
+  assert.ok(r.ok);
+  if (r.ok) {
+    assert.equal(r.value.items[0].waterSafety, 'safety_unknown');
+    assert.equal(r.value.items[0].unitVolumeMl, 3785);
+  }
+});

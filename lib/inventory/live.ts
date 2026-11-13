@@ -1,7 +1,7 @@
 import { CATEGORY_LABEL, type ItemCategory, type WaterSafety } from '@/types/echo';
 
 /** Kinds the live scanner recognises. Anything else is ignored. */
-export type LiveKind = 'water_bottle' | 'canned_food' | 'bandages' | 'first_aid_other';
+export type LiveKind = 'water_bottle' | 'canned_food' | 'other_food' | 'bandages' | 'first_aid_other' | 'unknown_item';
 export type WaterAppearance = 'clear' | 'cloudy_or_discolored' | 'not_applicable';
 /** Size classes from the team's reference chart. */
 export type WaterSize = 'small' | 'standard' | 'large' | 'gallon_jug' | 'not_applicable';
@@ -61,6 +61,13 @@ export function specFor(d: LiveDetection): LiveItemSpec {
     }
     case 'canned_food':
       return { key: 'canned_food', name: 'Canned food', category: 'food', unit: 'cans' };
+    case 'other_food': {
+      const name = cleanName(d.name) || 'Food item';
+      return { key: `food:${name.toLowerCase()}`, name, category: 'food', unit: 'items' };
+    }
+    case 'unknown_item':
+      // Not saved automatically — ECHO asks the survivor what it is.
+      return { key: 'unknown', name: 'Unknown item', category: 'other', unit: 'items' };
     case 'bandages':
       return { key: 'bandages', name: 'Bandages', category: 'medical', unit: 'boxes' };
     case 'first_aid_other': {
@@ -83,7 +90,7 @@ export function waterSafetyFor(appearance: WaterAppearance, sealedConfirmed: boo
 
 /** Short line ECHO says out loud after a successful save. */
 export function confirmationPhrase(e: LiveAddEvent): string {
-  if (e.waterSafety === 'possible_contamination') return `${e.name} added. Possible contamination — don't drink it.`;
+  if (e.waterSafety === 'possible_contamination') return `${e.name} added. Contaminated — do not drink it.`;
   if (e.categoryLabel === 'Water') return `${e.name} added.`;
   return `${e.name} added to ${e.categoryLabel.toLowerCase()}.`;
 }

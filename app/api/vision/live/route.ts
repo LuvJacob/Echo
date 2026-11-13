@@ -6,7 +6,7 @@ import type { LiveDetection, LiveKind, WaterAppearance, WaterSize } from '@/lib/
 export const runtime = 'nodejs';
 export const maxDuration = 20;
 
-const KINDS: LiveKind[] = ['water_bottle', 'canned_food', 'bandages', 'first_aid_other'];
+const KINDS: LiveKind[] = ['water_bottle', 'canned_food', 'other_food', 'bandages', 'first_aid_other', 'unknown_item'];
 const APPEARANCES: WaterAppearance[] = ['clear', 'cloudy_or_discolored', 'not_applicable'];
 const SIZES: WaterSize[] = ['small', 'standard', 'large', 'gallon_jug', 'not_applicable'];
 
@@ -21,10 +21,13 @@ const SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['kind', 'name', 'water_appearance', 'water_size', 'label_ml', 'confidence'],
+        required: ['kind', 'name', 'looks_like', 'contains_visible_liquid', 'certain', 'water_appearance', 'water_size', 'label_ml', 'confidence'],
         properties: {
           kind: { type: 'string', enum: KINDS },
-          name: { type: 'string', description: 'Short item name, e.g. "Gauze pads" (only matters for first_aid_other).' },
+          name: { type: 'string', description: 'Short item name, e.g. "Gauze pads" or "Bread".' },
+          looks_like: { type: 'string', description: 'Plain description of the object, e.g. "loaf of bread in a plastic bag".' },
+          contains_visible_liquid: { type: 'boolean', description: 'true ONLY if you can see liquid inside a transparent container.' },
+          certain: { type: 'boolean', description: 'true only if you are confident what this object is.' },
           water_appearance: { type: 'string', enum: APPEARANCES },
           water_size: { type: 'string', enum: SIZES },
           label_ml: { type: ['number', 'null'], description: 'Capacity printed on the label in mL, only if legible.' },
@@ -38,16 +41,25 @@ const SCHEMA = {
 const PROMPT = `
 You watch a live camera frame for a survival-inventory app. Report ONLY items from this list that are clearly
 visible and prominent (e.g. being held up to the camera):
-- water_bottle: a bottle of water
+- water_bottle: a bottle or jug that clearly contains LIQUID (water or any drinkable-looking liquid). Never use this for
+  solid food, bread, boxes or anything that is not a liquid container.
 - canned_food: a can of food
+- other_food: any other food (bread, snacks, ration bars, fruit, cereal, MREs...); give its short name, e.g. "Bread"
 - bandages: a box or pack of adhesive bandages / Band-Aids
 - first_aid_other: any other recognisable first-aid item (gauze, antiseptic, first-aid kit, medical tape...); give its short name
+- unknown_item: an object is clearly being held up to the camera but you cannot tell what it is, or it fits none of the
+  above. Use this instead of guessing.
 Report each kind at most once. Ignore people, hands, screens, furniture and anything not on the list.
-water_appearance: for water_bottle, "cloudy_or_discolored" if the liquid looks cloudy, murky or tinted, else "clear";
-for everything else "not_applicable".
+water_appearance (water_bottle only): look at the LIQUID itself, compared with the label and background.
+Answer "cloudy_or_discolored" if it shows ANY of: a colour tint (green, yellow, brown, orange, pink…), cloudiness or
+milkiness, murkiness, floating particles, sediment, or film. Answer "clear" only if the liquid is plainly colourless and
+transparent. When unsure, answer "cloudy_or_discolored" (a false alarm is safer than a missed one).
+For everything else "not_applicable".
 water_size (water only, else "not_applicable"): "small" = 8–12 oz mini bottle; "standard" = ordinary single-serve
 bottle (16.9–20 oz, the usual "bottle of water"); "large" = 1–1.5 L bottle; "gallon_jug" = big jug with a handle.
 label_ml: the capacity printed on the label in mL if you can read it (1 gallon = 3785), else null.
+First describe the object in looks_like, THEN pick the kind. A plastic bag, wrapper or box is NOT a water bottle.
+Set certain=false whenever you are not sure; the app will ask the survivor instead of guessing.
 If nothing on the list is visible, return an empty items array.
 `.trim();
 
@@ -114,6 +126,11 @@ function parseLive(raw: string): LiveDetection[] | null {
     if (typeof o.name !== 'string' || typeof o.confidence !== 'number') return null;
     if (!SIZES.includes(o.water_size as WaterSize)) return null;
     if (o.label_ml !== null && typeof o.label_ml !== 'number') return null;
+    // Guardrail: water must show liquid; anything uncertain is asked about instead of guessed.
+    let kind = o.kind as LiveKind;
+    if (o.certain !== true) kind = 'unknown_item';
+    if (kind === 'water_bottle' && o.contains_visible_liquid !== true) kind = 'unknown_item';
+    o.kind = kind;
     out.push({
       kind: o.kind as LiveKind,
       name: o.name,

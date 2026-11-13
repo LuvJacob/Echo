@@ -37,7 +37,12 @@ const FRAMES_TO_FORGET = 2;
  * appearance. Holding an item in view never re-adds it; take it out of frame and show another
  * one to add another.
  */
-export function useLiveScan(opts: { grabFrame: () => string | null; onAdded?: (e: LiveAddEvent) => void }): UseLiveScan {
+export function useLiveScan(opts: {
+  grabFrame: () => string | null;
+  onAdded?: (e: LiveAddEvent) => void;
+  /** Something is held up but the AI can't tell what it is → ask the survivor. */
+  onUnknown?: () => void;
+}): UseLiveScan {
   const [running, setRunning] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [inView, setInView] = useState<string[]>([]);
@@ -81,7 +86,10 @@ export function useLiveScan(opts: { grabFrame: () => string | null; onAdded?: (e
       }
       setError(null);
 
-      const detections = (data.items as LiveDetection[]).filter((d) => d.confidence >= MIN_CONFIDENCE);
+      const detections = (data.items as LiveDetection[])
+        .filter((d) => d.confidence >= MIN_CONFIDENCE)
+        // Low-confidence water → ask instead of guessing.
+        .map((d) => (d.kind === 'water_bottle' && d.confidence < 0.85 ? { ...d, kind: 'unknown_item' as const } : d));
       const seen = new Map<string, LiveDetection>();
       for (const d of detections) seen.set(specFor(d).key, d);
       setInView([...seen.values()].map((d) => specFor(d).name));
@@ -98,6 +106,10 @@ export function useLiveScan(opts: { grabFrame: () => string | null; onAdded?: (e
         if (present.current.has(key)) continue;
         present.current.set(key, 0);
         const spec = specFor(d);
+        if (d.kind === 'unknown_item') {
+          optsRef.current.onUnknown?.();
+          continue;
+        }
         const waterSafety = spec.category === 'water' ? waterSafetyFor(d.waterAppearance, sealedRef.current) : undefined;
         const r = InventoryService.applyActionSafe({
           type: 'inventory_update',

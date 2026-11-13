@@ -19,16 +19,22 @@ Rules:
 7. For weather, temperature, rain or wind, call get_weather and answer from its live result (mention it's live).
 8. If you asked whether a scanned water bottle is unopened and factory-sealed, call set_water_sealed with the
    survivor's yes/no answer, then confirm in a few words (e.g. "Marked as preferred for drinking.").
-9. Hazards and map threats in this demo are fictional. Radiation alerts are simulated. No medical diagnosis. Never promise a route is safe.
+9. If you asked "What is this item?" during a live scan, call add_scanned_item with what the survivor said
+   (food → "food"), then confirm in a few words (e.g. "Bread added to rations.").
+10. If the survivor tells you their name, call set_user_name, then greet them by name. Use their name occasionally.
+11. Hazards and map threats in this demo are fictional. Radiation alerts are simulated. No medical diagnosis. Never promise a route is safe.
 `.trim();
 
 export const VISION_PROMPT = `
 You analyse a photo for a survival-inventory app. List each distinct type of supply you can clearly see.
 - quantity: count only units you can actually see; if unsure, count conservatively and say so in uncertainty_notes.
 - unit_volume_ml: only if a capacity label is legible (e.g. "500 mL"); otherwise null. Never assume a standard size.
-- observations: short, purely visual notes (e.g. "liquid has a green tint", "cap seal looks broken").
-  Do NOT state whether anything is safe, drinkable, potable, clean or contaminated.
-- Do not guess fill level or storage location; the user will confirm those.
+- category "water" ONLY for bottles/jugs that contain liquid. Bread, snacks and other solid food are "food".
+- water_appearance (water only): "cloudy_or_discolored" for ANY tint (especially red, green, brown, yellow), cloudiness,
+  particles or sediment; "clear" only if plainly colourless. When unsure, "cloudy_or_discolored". Non-water: "not_applicable".
+- water_size (water only): small 8–12 oz, standard 16.9–20 oz bottle, large 1–1.5 L, gallon_jug with handle.
+- observations: short, purely visual notes (e.g. "liquid is red", "cap seal looks broken").
+- Do not guess storage location; the user will add it.
 - If no supplies are visible, return an empty items array and explain in uncertainty_notes.
 `.trim();
 

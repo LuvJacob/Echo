@@ -1,4 +1,5 @@
 'use client';
+import { WaterSafetyText } from '@/components/inventory/WaterSafetyText';
 
 import React, { useState } from 'react';
 import { InventoryItem, InventorySummary, ItemCategory, CATEGORY_LABEL, WATER_SAFETY_LABEL } from '@/types/echo';
@@ -193,7 +194,7 @@ export function InventoryList({
                             : 'border-echo-emerald/50 bg-echo-emerald/10 text-echo-emerald'
                       }`}
                     >
-                      {WATER_SAFETY_LABEL[item.waterSafety]}
+                      <WaterSafetyText safety={item.waterSafety} />
                     </span>
                   )}
                 </div>

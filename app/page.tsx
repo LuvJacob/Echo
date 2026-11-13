@@ -17,7 +17,9 @@ import { useEchoVoice } from '@/hooks/useEchoVoice';
 import { useSupplyScan } from '@/hooks/useSupplyScan';
 import { ChatMessage, AvatarStatus, InventoryItem } from '@/types/echo';
 import { confirmationPhrase } from '@/lib/inventory/live';
-import { setPendingSealQuestion } from '@/lib/inventory/sealQuestion';
+import { setPendingSealQuestion, setPendingUnknownQuestion, setUnknownResolver } from '@/lib/inventory/sealQuestion';
+import { UNKNOWN_ITEM_NAME } from '@/lib/ai/schemas';
+import { getUserName, greetingFor } from '@/lib/memory/profile';
 import { InventoryService } from '@/lib/inventory/service';
 
 const GREETING: ChatMessage = {
@@ -34,16 +36,73 @@ export default function HomePage() {
   const voice = useEchoVoice();
   const scan = useSupplyScan({
     confirmProposal,
-    onConfirmed: (r) =>
-      voice.notify(
-        `Inventory update confirmed by the survivor and saved. Water total is now ${r.totals.waterLiters} litres.`,
-        { respond: false }
-      ),
+    onConfirmed: (r, p) => {
+      voice.notify(`Inventory update confirmed by the survivor and saved. Water total is now ${r.totals.waterLiters} litres.`, {
+        respond: false,
+      });
+      const bad = p.items.find((i) => i.category === 'water' && i.waterSafety === 'possible_contamination');
+      const clear = p.items.find((i) => i.category === 'water' && i.waterSafety === 'safety_unknown');
+      if (bad) {
+        void voice.say(`Warning! ${bad.name} looks contaminated. Do not drink it.`, { urgent: true });
+      } else if (clear) {
+        setPendingSealQuestion({ id: p.id, name: clear.name, category: 'water', categoryLabel: 'Water', unitVolumeMl: clear.unitVolumeMl ?? undefined, waterSafety: 'safety_unknown', at: Date.now() });
+        void voice.ask(
+          `${clear.name} saved. Is it unopened and factory-sealed?`,
+          `A photo scan just saved "${clear.name}". You are asking whether it is unopened and factory-sealed. When the survivor answers, call set_water_sealed.`
+        );
+      }
+    },
   });
 
+  // ---- Photo review: ask out loud about anything the AI couldn't identify ----
+  const askedProposalRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    const p = scan.proposal;
+    if (scan.status !== 'review' || !p || askedProposalRef.current === p.id) return;
+    const idx = p.items.findIndex((i) => i.name === UNKNOWN_ITEM_NAME);
+    if (idx < 0) return;
+    askedProposalRef.current = p.id;
+    setUnknownResolver((name, category) => scan.updateItem(idx, { name, category }));
+    void voice.ask(
+      "I'm not sure what that is. What is this item?",
+      'A photo scan found an object it could not identify. You asked what it is. When the survivor answers, call add_scanned_item with a short name and the best category.'
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scan.status, scan.proposal]);
+
+  // ---- Greeting by name (remembered in this browser) ----
+  const [userName, setUserNameState] = useState<string | null>(null);
+  useEffect(() => setUserNameState(getUserName()), []);
+  const greetedRef = React.useRef(false);
+  useEffect(() => {
+    // Browsers block audio until the first click/tap, so ECHO greets out loud on the first interaction.
+    const onFirst = async () => {
+      if (greetedRef.current) return;
+      greetedRef.current = true;
+      await voice.connect();
+      const name = getUserName();
+      if (name) {
+        voice.notify(`The survivor's name is ${name}.`, { respond: false });
+        void voice.say(greetingFor(name));
+      } else {
+        void voice.ask(
+          'ECHO online. What should I call you?',
+          'You are asking the survivor for their first name. When they answer, call set_user_name, then greet them warmly by name in one short sentence.'
+        );
+      }
+    };
+    window.addEventListener('pointerdown', onFirst, { once: true });
+    return () => window.removeEventListener('pointerdown', onFirst);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const greeting: ChatMessage = userName
+    ? { ...GREETING, content: `${greetingFor(userName, new Date(), () => 0)} Hold the mic to talk, or type below.` }
+    : GREETING;
   const messages = useMemo<ChatMessage[]>(
-    () => [GREETING, ...voice.captions.map((c) => ({ id: c.id, role: c.role, content: c.text, timestamp: c.at }))],
-    [voice.captions]
+    () => [greeting, ...voice.captions.map((c) => ({ id: c.id, role: c.role, content: c.text, timestamp: c.at }))],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [voice.captions, userName]
   );
   const isLoading = voice.status === 'connecting' || voice.status === 'thinking';
 
@@ -232,6 +291,13 @@ export default function HomePage() {
         scan={scan}
         voiceListening={voice.status === 'listening'}
         voiceCaption={[...voice.captions].reverse().find((c) => c.role === 'assistant')?.text}
+        onLiveUnknown={() => {
+          if (!setPendingUnknownQuestion()) return; // already asking
+          void voice.ask(
+            "I can't tell what that is. What is this item?",
+            'The live scanner saw an object it could not identify. You asked what it is. When the survivor answers, call add_scanned_item with a short name and the best category.'
+          );
+        }}
         onLiveAdded={(e) => {
           if (e.category === 'water' && e.waterSafety === 'safety_unknown') {
             // Ask live; the spoken yes/no is recorded by the set_water_sealed tool.
@@ -240,6 +306,8 @@ export default function HomePage() {
               `${e.name} added. Is it unopened and factory-sealed?`,
               `Live scan just added one "${e.name}" (${e.unitVolumeMl ?? '?'} mL). You are asking whether it is unopened and factory-sealed. When the survivor answers, call set_water_sealed with their answer.`
             );
+          } else if (e.waterSafety === 'possible_contamination') {
+            void voice.say(`Warning! ${e.name} looks contaminated. Do not drink it.`, { urgent: true });
           } else {
             void voice.say(confirmationPhrase(e));
           }
