@@ -5,7 +5,8 @@ import type { AvatarStatus, EchoError, EchoErrorCode, ChatApiResponse } from '@/
 import { InventoryService } from '@/lib/inventory/service';
 import { parseToolArgs, runGetInventory } from '@/lib/ai/tools';
 import { fetchWeather, getBrowserLocation } from '@/lib/ai/weather';
-import { answerSealQuestion } from '@/lib/inventory/sealQuestion';
+import { answerSealQuestion, answerUnknownItem } from '@/lib/inventory/sealQuestion';
+import { answerUserName } from '@/lib/memory/profile';
 import { generateId } from '@/lib/utils';
 
 /**
@@ -369,7 +370,11 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
                       ? await fetchWeather(await getBrowserLocation())
                       : c.name === 'set_water_sealed'
                         ? answerSealQuestion(parseToolArgs(c.arguments))
-                        : { error: `Unknown tool ${c.name}` };
+                        : c.name === 'add_scanned_item'
+                          ? answerUnknownItem(parseToolArgs(c.arguments))
+                          : c.name === 'set_user_name'
+                            ? answerUserName(parseToolArgs(c.arguments))
+                            : { error: `Unknown tool ${c.name}` };
                 sendEvent({
                   type: 'conversation.item.create',
                   item: { type: 'function_call_output', call_id: c.call_id, output: JSON.stringify(result) },

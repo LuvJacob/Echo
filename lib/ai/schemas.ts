@@ -1,4 +1,5 @@
 import type { EchoResult, ItemCategory, ProposedItem } from '@/types/echo';
+import { WATER_SIZE_ML, waterSafetyFor, type WaterAppearance, type WaterSize } from '@/lib/inventory/live';
 
 export const ITEM_CATEGORIES: ItemCategory[] = [
   'water', 'food', 'medical', 'tool', 'weapon', 'fuel', 'shelter', 'comm', 'other',
@@ -21,7 +22,7 @@ export const VISION_JSON_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['name', 'category', 'quantity', 'unit', 'unit_volume_ml', 'observations', 'confidence'],
+        required: ['name', 'category', 'quantity', 'unit', 'unit_volume_ml', 'water_appearance', 'water_size', 'observations', 'confidence'],
         properties: {
           name: { type: 'string' },
           category: { type: 'string', enum: ITEM_CATEGORIES },
@@ -30,6 +31,16 @@ export const VISION_JSON_SCHEMA = {
           unit_volume_ml: {
             type: ['number', 'null'],
             description: 'Capacity of ONE unit in mL ONLY if a label is legible; otherwise null. Never guess.',
+          },
+          water_appearance: {
+            type: 'string',
+            enum: ['clear', 'cloudy_or_discolored', 'not_applicable'],
+            description: 'Water only: any tint (esp. red/green/brown), cloudiness, particles → cloudy_or_discolored. Else not_applicable.',
+          },
+          water_size: {
+            type: 'string',
+            enum: ['small', 'standard', 'large', 'gallon_jug', 'not_applicable'],
+            description: 'Water only: small 8–12 oz, standard 16.9–20 oz bottle, large 1–1.5 L, gallon_jug with handle.',
           },
           observations: {
             type: 'array',
@@ -99,6 +110,12 @@ export function parseVisionOutput(raw: unknown): EchoResult<ParsedVision> {
       return fail(`${at}.unit_volume_ml must be a positive number or null`);
     }
     if (!isStringArray(it.observations)) return fail(`${at}.observations must be a string array`);
+    const APPEAR = ['clear', 'cloudy_or_discolored', 'not_applicable'];
+    const SIZES = ['small', 'standard', 'large', 'gallon_jug', 'not_applicable'];
+    const appearance = (it.water_appearance ?? 'not_applicable') as WaterAppearance;
+    const size = (it.water_size ?? 'not_applicable') as WaterSize;
+    if (!APPEAR.includes(appearance)) return fail(`${at}.water_appearance is invalid`);
+    if (!SIZES.includes(size)) return fail(`${at}.water_size is invalid`);
     if (typeof it.confidence !== 'number' || it.confidence < 0 || it.confidence > 1) {
       return fail(`${at}.confidence must be between 0 and 1`);
     }
@@ -110,16 +127,20 @@ export function parseVisionOutput(raw: unknown): EchoResult<ParsedVision> {
     }
     if (it.category === 'water') hadWater = true;
 
+    const isWater = it.category === 'water';
+    // Team rule: assume capacity from the size chart when the label isn't legible; count as full.
+    const assumedMl = isWater && vol == null ? WATER_SIZE_ML[size === 'not_applicable' ? 'standard' : size] : null;
     items.push({
       name: it.name.trim(),
       category: it.category as ItemCategory,
       quantity: it.quantity as number,
       unit: it.unit.trim() || 'units',
-      unitVolumeMl: vol as number | null,
-      fillLevel: null, // user confirms
+      unitVolumeMl: (vol as number | null) ?? assumedMl,
+      fillLevel: isWater ? 'full' : null,
       location: null, // user confirms
       observations,
       drinkability: 'undetermined',
+      ...(isWater ? { waterSafety: waterSafetyFor(appearance === 'not_applicable' ? 'clear' : appearance, false) } : {}),
       confidence: it.confidence,
     });
   }

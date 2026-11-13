@@ -48,10 +48,37 @@ export const SET_WATER_SEALED_TOOL = {
   },
 } as const;
 
+export const ADD_SCANNED_ITEM_TOOL = {
+  type: 'function',
+  name: 'add_scanned_item',
+  description: 'After you asked "What is this item?" during a live scan, add the object the survivor named.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      name: { type: 'string', description: 'Short item name, e.g. "Bread"' },
+      category: { type: 'string', enum: ['water', 'food', 'medical', 'tool', 'other'] },
+    },
+    required: ['name', 'category'],
+  },
+} as const;
+
+export const SET_USER_NAME_TOOL = {
+  type: 'function',
+  name: 'set_user_name',
+  description: 'Remember the survivor\'s first name when they tell you what to call them.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    properties: { name: { type: 'string' } },
+    required: ['name'],
+  },
+} as const;
+
 /** Server-executable tools (/api/chat). */
 export const ECHO_TOOLS = [GET_INVENTORY_TOOL, GET_WEATHER_TOOL];
 /** Realtime voice session tools (executed in the browser). */
-export const REALTIME_TOOLS = [GET_INVENTORY_TOOL, GET_WEATHER_TOOL, SET_WATER_SEALED_TOOL];
+export const REALTIME_TOOLS = [GET_INVENTORY_TOOL, GET_WEATHER_TOOL, SET_WATER_SEALED_TOOL, ADD_SCANNED_ITEM_TOOL, SET_USER_NAME_TOOL];
 
 export interface InventoryToolOutput {
   items: {

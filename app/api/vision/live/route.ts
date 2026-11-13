@@ -6,7 +6,7 @@ import type { LiveDetection, LiveKind, WaterAppearance, WaterSize } from '@/lib/
 export const runtime = 'nodejs';
 export const maxDuration = 20;
 
-const KINDS: LiveKind[] = ['water_bottle', 'canned_food', 'bandages', 'first_aid_other'];
+const KINDS: LiveKind[] = ['water_bottle', 'canned_food', 'other_food', 'bandages', 'first_aid_other', 'unknown_item'];
 const APPEARANCES: WaterAppearance[] = ['clear', 'cloudy_or_discolored', 'not_applicable'];
 const SIZES: WaterSize[] = ['small', 'standard', 'large', 'gallon_jug', 'not_applicable'];
 
@@ -38,10 +38,14 @@ const SCHEMA = {
 const PROMPT = `
 You watch a live camera frame for a survival-inventory app. Report ONLY items from this list that are clearly
 visible and prominent (e.g. being held up to the camera):
-- water_bottle: a bottle of water
+- water_bottle: a bottle or jug that clearly contains LIQUID (water or any drinkable-looking liquid). Never use this for
+  solid food, bread, boxes or anything that is not a liquid container.
 - canned_food: a can of food
+- other_food: any other food (bread, snacks, ration bars, fruit, cereal, MREs...); give its short name, e.g. "Bread"
 - bandages: a box or pack of adhesive bandages / Band-Aids
 - first_aid_other: any other recognisable first-aid item (gauze, antiseptic, first-aid kit, medical tape...); give its short name
+- unknown_item: an object is clearly being held up to the camera but you cannot tell what it is, or it fits none of the
+  above. Use this instead of guessing.
 Report each kind at most once. Ignore people, hands, screens, furniture and anything not on the list.
 water_appearance (water_bottle only): look at the LIQUID itself, compared with the label and background.
 Answer "cloudy_or_discolored" if it shows ANY of: a colour tint (green, yellow, brown, orange, pink…), cloudiness or

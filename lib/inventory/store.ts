@@ -267,6 +267,7 @@ function toInventoryItem(p: ProposedItem, source: InventoryItem['source'], now: 
   if (p.fillLevel != null) item.fillLevel = p.fillLevel;
   if (p.location != null && p.location.trim()) item.location = p.location.trim();
   if (p.observations.length) item.observations = [...p.observations];
+  if (p.waterSafety) item.waterSafety = p.waterSafety;
   return item;
 }
 

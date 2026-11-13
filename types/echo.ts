@@ -65,9 +65,9 @@ export type ItemSource = 'manual' | 'vision_scan' | 'voice_prompt' | 'system_see
 export type WaterSafety = 'possible_contamination' | 'safety_unknown' | 'preferred';
 
 export const WATER_SAFETY_LABEL: Record<WaterSafety, string> = {
-  possible_contamination: 'Possible contamination — don\'t drink',
-  safety_unknown: 'Safety unknown',
-  preferred: 'Preferred for drinking',
+  possible_contamination: 'CONTAMINATED — DO NOT DRINK',
+  safety_unknown: 'Clear — test before drinking',
+  preferred: 'Sealed — good for drinking',
 };
 
 /** [Person B] Display names for categories used in the UI and spoken confirmations. */
@@ -286,8 +286,10 @@ export interface ProposedItem {
   fillLevel: FillLevel | null;
   location: string | null;
   observations: string[];
-  /** Always 'undetermined': ECHO never certifies water as drinkable from a photo. */
+  /** Legacy field, always 'undetermined'. Use waterSafety for the recommendation. */
   drinkability: 'undetermined';
+  /** Water only: contaminated (tint/cloudy) / clear-test-first / sealed-good. */
+  waterSafety?: WaterSafety;
   confidence: number; // 0..1
 }
 
