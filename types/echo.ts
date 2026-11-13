@@ -61,6 +61,9 @@ export type ItemCategory =
 
 export type ItemSource = 'manual' | 'vision_scan' | 'voice_prompt' | 'system_seed';
 
+/** How full a container is. Unset (undefined) means "not confirmed by the user". */
+export type FillLevel = 'full' | 'three_quarters' | 'half' | 'quarter' | 'empty';
+
 export interface InventoryItem {
   id: string;
   name: string;
@@ -72,6 +75,14 @@ export interface InventoryItem {
   notes?: string;
   expiryDate?: string; // ISO date string if applicable
   caloriesPerUnit?: number;
+  /** [Person B, additive] Capacity of ONE unit in millilitres, only if confirmed. */
+  unitVolumeMl?: number;
+  /** [Person B, additive] Confirmed fill level. Unset = unknown, excluded from litre totals. */
+  fillLevel?: FillLevel;
+  /** [Person B, additive] Free-text storage location, e.g. "locker seven". */
+  location?: string;
+  /** [Person B, additive] Visual observations (e.g. "liquid looks green"). Never a safety verdict. */
+  observations?: string[];
 }
 
 export interface InventorySummary {
@@ -154,6 +165,8 @@ export type InventoryUpdateAction = {
   item: Omit<InventoryItem, 'id' | 'updatedAt'> & { id?: string };
   reason?: string;
   confidence?: number;
+  /** [Person B, additive] When set, applying this action twice is a no-op (idempotent). */
+  proposalId?: string;
 };
 
 export type SaveLocationAction = {
@@ -215,7 +228,82 @@ export interface VisionApiResponse {
   result?: VisionResult;
   proposedAction?: EchoAction;
   error?: string;
+  /** [Person B, additive] Validated, editable proposal. Prefer this over `result`. */
+  proposal?: InventoryProposal;
+  /** [Person B, additive] Machine-readable error code. */
+  errorCode?: EchoErrorCode;
+  /** [Person B, additive] True when served by the labelled offline fixture (no API key). */
+  mock?: boolean;
 }
+
+// ==========================================
+// 8. [Person B, additive] Proposals, receipts, errors
+// ==========================================
+
+export type EchoErrorCode =
+  | 'no_api_key'
+  | 'mic_denied'
+  | 'mic_unavailable'
+  | 'playback_failed'
+  | 'connection_failed'
+  | 'provider_error'
+  | 'invalid_model_output'
+  | 'invalid_request'
+  | 'save_failed'
+  | 'proposal_not_found'
+  | 'unknown';
+
+export interface EchoError {
+  code: EchoErrorCode;
+  message: string; // human-readable, safe to show in UI
+}
+
+/** One line of a proposal. Nullable fields are UNKNOWN until the user fills them in. */
+export interface ProposedItem {
+  name: string;
+  category: ItemCategory;
+  quantity: number;
+  unit: string;
+  unitVolumeMl: number | null;
+  fillLevel: FillLevel | null;
+  location: string | null;
+  observations: string[];
+  /** Always 'undetermined': ECHO never certifies water as drinkable from a photo. */
+  drinkability: 'undetermined';
+  confidence: number; // 0..1
+}
+
+export interface InventoryProposal {
+  id: string; // idempotency key
+  source: ItemSource;
+  operation: 'add';
+  items: ProposedItem[];
+  summary: string;
+  uncertaintyNotes: string[];
+  createdAt: number;
+  status: 'pending' | 'confirmed' | 'rejected';
+}
+
+/** Returned ONLY after the write to the canonical store succeeded and was read back. */
+export interface InventoryReceipt {
+  proposalId: string;
+  appliedAt: number;
+  itemIds: string[];
+  /** True when this proposal had already been applied; nothing was written twice. */
+  duplicate: boolean;
+  totals: InventoryTotals;
+}
+
+export interface InventoryTotals {
+  /** Litres from water items with confirmed quantity, unitVolumeMl AND fillLevel. */
+  waterLiters: number;
+  waterContainers: number;
+  /** Water containers missing volume or fill level (not counted in waterLiters). */
+  waterContainersUnknownVolume: number;
+  totalItems: number;
+}
+
+export type EchoResult<T> = { ok: true; value: T } | { ok: false; error: EchoError };
 
 // --- POST /api/voice ---
 export interface VoiceApiRequest {

@@ -1,71 +1,50 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { VisionApiRequest, VisionApiResponse, VisionResult } from '@/types/echo';
+import type { VisionApiRequest, VisionApiResponse } from '@/types/echo';
+import { analyzeSupplyImage, buildProposal, toLegacyVisionResult, validateImageDataUrl } from '@/lib/ai/vision';
+import { ProviderError } from '@/lib/ai/openai';
 
+export const runtime = 'nodejs';
+export const maxDuration = 30;
+
+/**
+ * POST /api/vision — photo → validated, editable proposal. NEVER mutates inventory.
+ * Dev-only: header `x-echo-test-output: <json>` injects raw model output to test validation.
+ */
 export async function POST(req: NextRequest) {
+  let body: VisionApiRequest;
   try {
-    const body: VisionApiRequest = await req.json();
-
-    if (!body || !body.image) {
-      return NextResponse.json<VisionApiResponse>(
-        {
-          success: false,
-          error: 'Missing required field: image',
-        },
-        { status: 400 }
-      );
-    }
-
-    // Scaffolding / Mock Vision Response
-    // Person B will integrate OpenAI GPT-4o / Gemini Flash Vision API here
-    const mockVisionResult: VisionResult = {
-      detectedObjects: [
-        {
-          name: 'Purified Water Bottle (500ml)',
-          category: 'water',
-          quantity: 3,
-          unit: 'bottles',
-          confidence: 0.94,
-          notes: 'Standard sealed plastic bottles. Fluid appears clear.',
-          boundingBox: { x: 120, y: 80, width: 240, height: 380 },
-        },
-      ],
-      rawDescription: 'Visual scan identified 3 standard water bottles on a flat surface.',
-      uncertaintyNotes: [
-        'Seal integrity assumed intact based on visual outline; verify physically.',
-        'Fluids cannot be certified potable by optical scan alone.',
-      ],
-      safetyConcerns: [],
-      suggestedAction: {
-        type: 'inventory_update',
-        operation: 'add',
-        item: {
-          name: 'Purified Water Bottle (500ml)',
-          category: 'water',
-          quantity: 3,
-          unit: 'bottles',
-          source: 'vision_scan',
-        },
-        reason: 'Vision scan candidate detection (3 bottles)',
-        confidence: 0.94,
-      },
-      processedAt: Date.now(),
-    };
-
-    const response: VisionApiResponse = {
-      success: true,
-      result: mockVisionResult,
-      proposedAction: mockVisionResult.suggestedAction,
-    };
-
-    return NextResponse.json(response);
-  } catch (error) {
-    console.error('[API /api/vision] Error:', error);
-    return NextResponse.json<VisionApiResponse>(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Internal Server Error',
-      },
-      { status: 500 }
-    );
+    body = await req.json();
+  } catch {
+    return err(400, 'invalid_request', 'Request body must be JSON.');
   }
+
+  const bad = validateImageDataUrl(body?.image);
+  if (bad) return err(400, 'invalid_request', bad);
+
+  let testModelOutput: unknown;
+  const testHeader = req.headers.get('x-echo-test-output');
+  if (testHeader && process.env.NODE_ENV !== 'production') testModelOutput = testHeader;
+
+  try {
+    const r = await analyzeSupplyImage(body.image, { testModelOutput });
+    if (!r.ok) return err(502, r.error.code, r.error.message, r.mock);
+
+    const proposal = buildProposal(r.value);
+    const result = toLegacyVisionResult(proposal);
+    return NextResponse.json<VisionApiResponse>({
+      success: true,
+      proposal,
+      result,
+      proposedAction: result.suggestedAction,
+      mock: r.mock,
+    });
+  } catch (e) {
+    console.error('[API /api/vision]', e);
+    const status = e instanceof ProviderError ? (e.status === 503 ? 503 : 502) : 500;
+    return err(status, 'provider_error', 'Image analysis failed. Try another photo or retry in a moment.');
+  }
+}
+
+function err(status: number, errorCode: VisionApiResponse['errorCode'], error: string, mock?: boolean) {
+  return NextResponse.json<VisionApiResponse>({ success: false, error, errorCode, mock }, { status });
 }
