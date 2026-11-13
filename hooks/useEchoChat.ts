@@ -1,25 +1,29 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { ChatMessage, ChatApiResponse, AvatarStatus, EchoAction, InventoryItem } from '@/types/echo';
 import { generateId } from '@/lib/utils';
 import { EchoStorage } from '@/lib/storage/localStorage';
+import { InventoryService } from '@/lib/inventory/service';
+
+const GREETING = (): ChatMessage => ({
+  id: generateId('msg'),
+  role: 'assistant',
+  content: 'ECHO Tactical AI initialized. Systems nominal. Ready for commands.',
+  speechText: 'ECHO Tactical AI initialized. Systems nominal.',
+  timestamp: Date.now(),
+});
 
 export function useEchoChat(inventorySnapshot: InventoryItem[] = []) {
-  const [messages, setMessages] = useState<ChatMessage[]>(() => {
-    const saved = EchoStorage.getChatHistory();
-    if (saved.length > 0) return saved;
-    return [
-      {
-        id: generateId('msg'),
-        role: 'assistant',
-        content: 'ECHO Tactical AI initialized. Systems nominal. Ready for commands.',
-        speechText: 'ECHO Tactical AI initialized. Systems nominal.',
-        timestamp: Date.now(),
-      },
-    ];
-  });
+  const [messages, setMessages] = useState<ChatMessage[]>([GREETING()]);
 
+  // Load persisted history after mount to avoid hydration mismatch.
+  useEffect(() => {
+    const saved = EchoStorage.getChatHistory();
+    if (saved.length > 0) setMessages(saved);
+  }, []);
+
+  const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [avatarStatus, setAvatarStatus] = useState<AvatarStatus>('idle');
   const [pendingAction, setPendingAction] = useState<EchoAction | null>(null);
@@ -40,7 +44,16 @@ export function useEchoChat(inventorySnapshot: InventoryItem[] = []) {
       EchoStorage.saveChatHistory(newHistory);
 
       setIsLoading(true);
+      setError(null);
       setAvatarStatus('thinking');
+
+      // Prefer a fresh read of the persisted store over the (possibly stale) prop.
+      let snapshot: InventoryItem[] = inventorySnapshot;
+      try {
+        snapshot = InventoryService.list();
+      } catch {
+        /* fall back to prop */
+      }
 
       try {
         const res = await fetch('/api/chat', {
@@ -49,7 +62,7 @@ export function useEchoChat(inventorySnapshot: InventoryItem[] = []) {
           body: JSON.stringify({
             message: text,
             history: newHistory,
-            inventorySnapshot,
+            inventorySnapshot: snapshot,
           }),
         });
 
@@ -80,6 +93,7 @@ export function useEchoChat(inventorySnapshot: InventoryItem[] = []) {
         }
       } catch (err) {
         console.error('[useEchoChat] Chat request failed', err);
+        setError(err instanceof Error ? err.message : 'Chat request failed');
         setAvatarStatus('error');
         setTimeout(() => setAvatarStatus('idle'), 3000);
       } finally {
@@ -101,5 +115,6 @@ export function useEchoChat(inventorySnapshot: InventoryItem[] = []) {
     pendingAction,
     sendMessage,
     clearPendingAction,
+    error,
   };
 }
