@@ -1,68 +1,69 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { StatusHeader } from '@/components/dashboard/StatusHeader';
 import { AlertTicker } from '@/components/dashboard/AlertTicker';
 import { SurvivalGauges } from '@/components/dashboard/SurvivalGauges';
 import { QuickActions } from '@/components/dashboard/QuickActions';
 import { ConversationFeed } from '@/components/dashboard/ConversationFeed';
 import { AvatarVisualizer } from '@/components/avatar/AvatarVisualizer';
-import { useSpeechAudio } from '@/components/avatar/useSpeechAudio';
 import { InventoryList } from '@/components/inventory/InventoryList';
-import { ActionConfirmModal } from '@/components/inventory/ActionConfirmModal';
 import { PhotoUploadModal } from '@/components/inventory/PhotoUploadModal';
 import { ManualAddItemModal } from '@/components/inventory/ManualAddItemModal';
 import { LocationTracker } from '@/components/maps/LocationTracker';
 import { Card } from '@/components/ui';
 import { useInventory } from '@/hooks/useInventory';
-import { useEchoChat } from '@/hooks/useEchoChat';
-import { EchoAction, AvatarStatus, InventoryItem } from '@/types/echo';
+import { useEchoVoice } from '@/hooks/useEchoVoice';
+import { useSupplyScan } from '@/hooks/useSupplyScan';
+import { ChatMessage, AvatarStatus, InventoryItem } from '@/types/echo';
 import { InventoryService } from '@/lib/inventory/service';
 
-export default function HomePage() {
-  const { items, summary, isLoaded, refresh, addItem, applyAction } = useInventory();
-  const {
-    messages,
-    isLoading,
-    avatarStatus,
-    setAvatarStatus,
-    pendingAction,
-    sendMessage,
-    clearPendingAction,
-  } = useEchoChat(items);
+const GREETING: ChatMessage = {
+  id: 'greeting',
+  role: 'assistant',
+  content: 'ECHO online. Hold the mic to talk, or type below. Scan supplies to log them.',
+  timestamp: 0,
+};
 
-  const {
-    isSpeaking,
-    amplitude,
-    speechEnabled,
-    setSpeechEnabled,
-    speak,
-    stop,
-  } = useSpeechAudio();
+export default function HomePage() {
+  const { items, summary, isLoaded, refresh, addItem, applyAction, confirmProposal } = useInventory();
+
+  // [Person B] One voice session drives captions, avatar state and jaw amplitude.
+  const voice = useEchoVoice();
+  const scan = useSupplyScan({
+    confirmProposal,
+    onConfirmed: (r) =>
+      voice.notify(
+        `Inventory update confirmed by the survivor and saved. Water total is now ${r.totals.waterLiters} litres.`,
+        { respond: false }
+      ),
+  });
+
+  const messages = useMemo<ChatMessage[]>(
+    () => [GREETING, ...voice.captions.map((c) => ({ id: c.id, role: c.role, content: c.text, timestamp: c.at }))],
+    [voice.captions]
+  );
+  const isLoading = voice.status === 'connecting' || voice.status === 'thinking';
+
+  // Manual avatar state (dev toolbar) only applies while ECHO itself is idle.
+  const [manualStatus, setManualStatus] = useState<AvatarStatus | null>(null);
+  const voiceActive = voice.status !== 'disconnected' && voice.status !== 'ready';
+  const avatarStatus: AvatarStatus = voiceActive ? voice.avatarStatus : manualStatus ?? voice.avatarStatus;
+  const setAvatarStatus = (s: AvatarStatus) => setManualStatus(s === 'idle' ? null : s);
+
+  const [speechEnabled, setSpeechEnabled] = useState(true);
+  useEffect(() => {
+    if (voice.audioElement) voice.audioElement.muted = !speechEnabled;
+  }, [speechEnabled, voice.audioElement]);
 
   const [inputVal, setInputVal] = useState('');
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
   const [isManualAddOpen, setIsManualAddOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'inventory' | 'maps'>('inventory');
 
-  // Trigger speech synthesis when assistant finishes or when requested
   const handleSendMessage = (text: string) => {
-    sendMessage(text);
+    void voice.sendText(text);
     setInputVal('');
-  };
-
-  const handlePlayVoice = (text: string) => {
-    setAvatarStatus('speaking');
-    speak(text, () => {
-      setAvatarStatus('idle');
-    });
-  };
-
-  const handleConfirmAction = (action: EchoAction) => {
-    if (action.type === 'inventory_update') {
-      applyAction(action);
-    }
-    clearPendingAction();
   };
 
   const handleManualAdd = (item: Omit<InventoryItem, 'id' | 'updatedAt'>) => {
@@ -116,14 +117,7 @@ export default function HomePage() {
               {(['idle', 'listening', 'thinking', 'speaking', 'error'] as AvatarStatus[]).map((st) => (
                 <button
                   key={st}
-                  onClick={() => {
-                    setAvatarStatus(st);
-                    if (st === 'speaking') {
-                      handlePlayVoice('Tactical report: Three water bottles detected in storage.');
-                    } else {
-                      stop();
-                    }
-                  }}
+                  onClick={() => setAvatarStatus(st)}
                   className={`px-1.5 py-0.5 text-[9px] font-mono rounded border uppercase transition-colors ${
                     avatarStatus === st
                       ? 'bg-echo-cyan text-echo-bg border-echo-cyan font-bold shadow-[0_0_6px_rgba(0,229,255,0.6)]'
@@ -137,7 +131,7 @@ export default function HomePage() {
 
             <AvatarVisualizer
               status={avatarStatus}
-              amplitude={amplitude}
+              amplitude={voiceActive ? voice.amplitude : 0}
               speechEnabled={speechEnabled}
               onToggleSpeech={() => setSpeechEnabled(!speechEnabled)}
               onStatusChange={(newStatus) => setAvatarStatus(newStatus)}
@@ -153,6 +147,23 @@ export default function HomePage() {
                 disabled={isLoading}
               />
             </div>
+
+            {/* [Person B] Voice errors: mic blocked, audio blocked, link dropped */}
+            {voice.error && (
+              <div className="mt-2 flex items-start justify-between gap-2 rounded-lg border border-echo-rose/50 bg-echo-rose/10 p-2 text-[11px] font-mono text-echo-rose">
+                <span>{voice.error.message}</span>
+                <span className="flex shrink-0 gap-1">
+                  {voice.error.code === 'playback_failed' && (
+                    <button onClick={() => voice.resumePlayback()} className="rounded border border-echo-rose/60 px-2 py-0.5 hover:bg-echo-rose/20">
+                      Enable audio
+                    </button>
+                  )}
+                  <button onClick={voice.clearError} className="rounded border border-echo-rose/60 px-2 py-0.5 hover:bg-echo-rose/20">
+                    Dismiss
+                  </button>
+                </span>
+              </div>
+            )}
           </Card>
 
           {/* Conversation Terminal Stream */}
@@ -163,8 +174,7 @@ export default function HomePage() {
             inputVal={inputVal}
             onInputChange={setInputVal}
             onSendMessage={handleSendMessage}
-            onPlaySpeech={handlePlayVoice}
-            onAuthorizeAction={handleConfirmAction}
+            voice={voice}
           />
         </div>
 
@@ -214,16 +224,10 @@ export default function HomePage() {
       </div>
 
       {/* 3. Action Confirmation & Photo Upload Modals */}
-      <ActionConfirmModal
-        action={pendingAction}
-        onConfirm={handleConfirmAction}
-        onCancel={clearPendingAction}
-      />
-
       <PhotoUploadModal
         isOpen={isPhotoModalOpen}
         onClose={() => setIsPhotoModalOpen(false)}
-        onActionProposed={(action) => handleConfirmAction(action)}
+        scan={scan}
       />
 
       <ManualAddItemModal

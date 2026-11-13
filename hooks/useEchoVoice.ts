@@ -114,6 +114,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const holdStartRef = useRef(0);
+  const releasedRef = useRef(true); // true once the user lets go (even mid-connect)
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -122,6 +123,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
   const synthAmpRef = useRef<number | null>(null); // browser-TTS simulated amplitude
   const connectingRef = useRef<Promise<void> | null>(null);
   const handledCalls = useRef(new Set<string>());
+  const responseActiveRef = useRef(false);
 
   const setStatus = useCallback((s: VoiceStatus) => {
     statusRef.current = s;
@@ -248,9 +250,11 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
   const handleRealtimeEvent = useCallback(
     (evt: Record<string, any>) => {
       switch (evt.type) {
-        case 'conversation.item.input_audio_transcription.delta':
-          upsertCaption(evt.item_id, 'user', evt.delta ?? '', false, true);
+        case 'conversation.item.input_audio_transcription.delta': {
+          const prev = captionsRef.current.find((c) => c.id === evt.item_id)?.text ?? '';
+          upsertCaption(evt.item_id, 'user', (prev === '…' ? '' : prev) + (evt.delta ?? ''), false);
           break;
+        }
         case 'conversation.item.input_audio_transcription.completed':
           upsertCaption(evt.item_id, 'user', evt.transcript ?? '', true);
           break;
@@ -262,7 +266,12 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
         case 'response.audio_transcript.done':
           upsertCaption(evt.item_id, 'assistant', evt.transcript ?? '', true);
           break;
+        case 'input_audio_buffer.committed':
+          // Placeholder so the user's line sits ABOVE ECHO's reply even if transcription arrives late.
+          if (evt.item_id) upsertCaption(evt.item_id, 'user', '…', false);
+          break;
         case 'response.created':
+          responseActiveRef.current = true;
           if (statusRef.current !== 'listening') setStatus('thinking');
           break;
         case 'output_audio_buffer.started':
@@ -273,6 +282,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
           if (statusRef.current === 'speaking') setStatus('ready');
           break;
         case 'response.done': {
+          responseActiveRef.current = false;
           const output: any[] = evt.response?.output ?? [];
           const calls = output.filter((o) => o.type === 'function_call' && !handledCalls.current.has(o.call_id));
           if (calls.length) {
@@ -300,6 +310,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
         }
         case 'error': {
           const msg: string = evt.error?.message ?? 'Realtime error';
+          if (/cancel|no active response|not active/i.test(msg)) break; // harmless barge-in race
           if (/buffer too small|buffer is empty/i.test(msg)) {
             if (statusRef.current === 'thinking') setStatus('ready');
             break; // a too-short press; not worth surfacing
@@ -366,7 +377,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
       void playElement(el);
     };
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+      if (pc.connectionState === 'failed') {
         if (pcRef.current === pc) fail(err('connection_failed', 'Voice link dropped. Press talk to reconnect.'), true);
       }
     };
@@ -413,6 +424,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
     if (statusRef.current !== 'disconnected' && statusRef.current !== 'error') return;
 
     const run = (async () => {
+      teardown(); // drop any dead peer connection before reconnecting
       setError(null);
       setStatus('connecting');
       ensureAudio(); // inside the user gesture → unlocks autoplay
@@ -559,15 +571,18 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
 
   // ---------- push-to-talk ----------
   const startTalking = useCallback(async () => {
+    releasedRef.current = false;
     if (statusRef.current === 'disconnected' || statusRef.current === 'error') await connect();
     if (statusRef.current === 'disconnected' || statusRef.current === 'error') return;
+    // Released while connecting / answering the mic permission prompt → don't open the mic.
+    if (releasedRef.current) return;
     setError(null);
     holdStartRef.current = performance.now();
 
     if (modeRef.current === 'realtime') {
       // barge-in: stop ECHO talking
       if (statusRef.current === 'speaking' || statusRef.current === 'thinking') {
-        sendEvent({ type: 'response.cancel' });
+        if (responseActiveRef.current) sendEvent({ type: 'response.cancel' });
         sendEvent({ type: 'output_audio_buffer.clear' });
       }
       sendEvent({ type: 'input_audio_buffer.clear' });
@@ -583,6 +598,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
     try {
       const mic = await getMic();
       const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((m) => MediaRecorder.isTypeSupported?.(m));
+      if (releasedRef.current) return; // let go during the permission prompt
       const rec = new MediaRecorder(mic, mime ? { mimeType: mime } : undefined);
       chunksRef.current = [];
       rec.ondataavailable = (e) => e.data.size && chunksRef.current.push(e.data);
@@ -596,6 +612,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
   }, [connect, fail, getMic, sendEvent, setStatus]);
 
   const stopTalking = useCallback(() => {
+    releasedRef.current = true;
     if (!isMicHeldRef(recorderRef, micRef, modeRef)) return;
     const held = performance.now() - holdStartRef.current;
     setMicHeld(false);
@@ -657,7 +674,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
       setError(null);
       if (modeRef.current === 'realtime' && dcRef.current?.readyState === 'open') {
         if (statusRef.current === 'speaking' || statusRef.current === 'thinking') {
-          sendEvent({ type: 'response.cancel' });
+          if (responseActiveRef.current) sendEvent({ type: 'response.cancel' });
           sendEvent({ type: 'output_audio_buffer.clear' });
         }
         const id = generateId('cap');
