@@ -99,6 +99,17 @@ export function categoryLabel(c: ItemCategory): string {
   return CATEGORY_LABEL[c] ?? c;
 }
 
+const GENERIC = new Set(['bag', 'can', 'cans', 'box', 'pack', 'bottle', 'bottles', 'jug', 'item', 'items', 'food', 'of', 'the', 'a', 'and', 'some', 'with', 'small', 'large']);
+
+/** Same item named differently ("Bag of red kidney beans" vs "Red kidney beans")? */
+export function similarItem(a: string, b: string): boolean {
+  const words = (s: string) => s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !GENERIC.has(w));
+  const A = words(a);
+  const B = new Set(words(b));
+  if (!A.length || !B.size) return a.trim().toLowerCase() === b.trim().toLowerCase();
+  return A.some((w) => B.has(w) || B.has(w.replace(/s$/, '')) || B.has(w + 's'));
+}
+
 function cleanName(s: string): string {
   const t = (s || '').replace(/[^\p{L}\p{N} '\-]/gu, '').trim().slice(0, 40);
   return t ? t[0].toUpperCase() + t.slice(1) : '';

@@ -5,6 +5,7 @@ import type { EchoError } from '@/types/echo';
 import { InventoryService } from '@/lib/inventory/service';
 import { INVENTORY_CHANGED_EVENT } from '@/hooks/useInventory';
 import {
+  similarItem,
   categoryLabel,
   specFor,
   waterSafetyFor,
@@ -16,6 +17,10 @@ import { generateId } from '@/lib/utils';
 export type { LiveAddEvent } from '@/lib/inventory/live';
 
 export interface UseLiveScan {
+  /** Human-readable status for the scanner: lock-on, countdown, "remove item" hints. */
+  hint: string;
+  /** Seconds left in the post-add countdown (0 when ready). */
+  cooldown: number;
   running: boolean;
   analyzing: boolean;
   inView: string[];
@@ -29,13 +34,17 @@ export interface UseLiveScan {
 
 const FRAME_INTERVAL_MS = 1500;
 const MIN_CONFIDENCE = 0.6;
-/** Frames an item must be missing before it can be counted again (so holding it up adds it once). */
-const FRAMES_TO_FORGET = 2;
+/** Consecutive frames an item must be seen before it's added ("lock on"). */
+const LOCK_FRAMES = 2;
+/** Countdown after each add; nothing else is added meanwhile. */
+const COOLDOWN_MS = 10000;
 
 /**
- * Live camera scanning: analyses a frame every ~1.5 s and adds each recognised item ONCE per
- * appearance. Holding an item in view never re-adds it; take it out of frame and show another
- * one to add another.
+ * Live camera scanning, one item at a time:
+ *  1. lock on: the same item must appear in 2 consecutive frames,
+ *  2. add it once, then a 10 s countdown,
+ *  3. a SIMILAR item is only added again after the frame was empty (it moved away);
+ *     a DIFFERENT item is added after the countdown.
  */
 export function useLiveScan(opts: {
   grabFrame: () => string | null;
@@ -49,6 +58,13 @@ export function useLiveScan(opts: {
   const [added, setAdded] = useState<LiveAddEvent[]>([]);
   const [sealedConfirmed, setSealedConfirmedState] = useState(false);
   const [error, setError] = useState<EchoError | null>(null);
+  const [hint, setHint] = useState('');
+  const [cooldown, setCooldown] = useState(0);
+  const cooldownUntil = useRef(0);
+  const lastAddedName = useRef<string | null>(null);
+  const clearedSinceAdd = useRef(true);
+  const candidate = useRef<{ name: string; count: number } | null>(null);
+  const unknownFrames = useRef(0);
 
   const optsRef = useRef(opts);
   optsRef.current = opts;
@@ -57,8 +73,6 @@ export function useLiveScan(opts: {
   const inFlight = useRef(false);
   const sessionRef = useRef('');
   const seqRef = useRef(0);
-  /** dedupe key → consecutive frames missing */
-  const present = useRef(new Map<string, number>());
 
   const setSealedConfirmed = useCallback((v: boolean) => {
     sealedRef.current = v;
@@ -94,56 +108,80 @@ export function useLiveScan(opts: {
       for (const d of detections) seen.set(specFor(d).key, d);
       setInView([...seen.values()].map((d) => specFor(d).name));
 
-      // Forget items that left the frame.
-      for (const [key, misses] of present.current) {
-        if (seen.has(key)) present.current.set(key, 0);
-        else if (misses + 1 >= FRAMES_TO_FORGET) present.current.delete(key);
-        else present.current.set(key, misses + 1);
+      const known = detections.filter((d) => d.kind !== 'unknown_item');
+
+      // Nothing recognisable in view → the previous item has moved away.
+      if (known.length === 0) {
+        clearedSinceAdd.current = true;
+        candidate.current = null;
+        if (detections.some((d) => d.kind === 'unknown_item')) {
+          if (++unknownFrames.current >= LOCK_FRAMES && Date.now() >= cooldownUntil.current) {
+            unknownFrames.current = 0;
+            optsRef.current.onUnknown?.();
+          }
+        } else {
+          unknownFrames.current = 0;
+        }
+        if (Date.now() >= cooldownUntil.current) setHint('');
+        return;
+      }
+      unknownFrames.current = 0;
+
+      if (Date.now() < cooldownUntil.current) return; // countdown running
+
+      // One item at a time: the most confident one.
+      const d = known.reduce((a, b) => (b.confidence > a.confidence ? b : a));
+      const spec = specFor(d);
+
+      if (lastAddedName.current && similarItem(spec.name, lastAddedName.current) && !clearedSinceAdd.current) {
+        setHint(`Remove the ${lastAddedName.current.toLowerCase()} to scan the next item`);
+        return;
       }
 
-      // Add newly appeared items exactly once.
-      for (const [key, d] of seen) {
-        if (present.current.has(key)) continue;
-        present.current.set(key, 0);
-        const spec = specFor(d);
-        if (d.kind === 'unknown_item') {
-          optsRef.current.onUnknown?.();
-          continue;
-        }
-        const waterSafety = spec.category === 'water' ? waterSafetyFor(d.waterAppearance, sealedRef.current) : undefined;
-        const r = InventoryService.applyActionSafe({
-          type: 'inventory_update',
-          operation: 'add',
-          proposalId: `live_${session}_${++seqRef.current}`, // idempotent write
-          item: {
-            name: spec.name,
-            category: spec.category,
-            quantity: 1,
-            unit: spec.unit,
-            source: 'vision_scan',
-            ...(waterSafety ? { waterSafety } : {}),
-            // Assumed from the size chart; treated as full so it counts toward litres.
-            ...(spec.unitVolumeMl ? { unitVolumeMl: spec.unitVolumeMl, fillLevel: 'full' as const } : {}),
-          },
-        });
-        if (!r.ok) {
-          present.current.delete(key); // allow retry on the next frame
-          setError(r.error);
-          continue;
-        }
-        window.dispatchEvent(new Event(INVENTORY_CHANGED_EVENT));
-        const evt: LiveAddEvent = {
-          id: generateId('live'),
+      if (candidate.current && similarItem(candidate.current.name, spec.name)) candidate.current.count++;
+      else candidate.current = { name: spec.name, count: 1 };
+
+      if (candidate.current.count < LOCK_FRAMES) {
+        setHint(`Locking on: ${spec.name}… hold still`);
+        return;
+      }
+      candidate.current = null;
+
+      const waterSafety = spec.category === 'water' ? waterSafetyFor(d.waterAppearance, sealedRef.current) : undefined;
+      const r = InventoryService.applyActionSafe({
+        type: 'inventory_update',
+        operation: 'add',
+        proposalId: `live_${session}_${++seqRef.current}`, // idempotent write
+        item: {
           name: spec.name,
           category: spec.category,
-          categoryLabel: categoryLabel(spec.category),
-          unitVolumeMl: spec.unitVolumeMl,
-          waterSafety,
-          at: Date.now(),
-        };
-        setAdded((a) => [...a, evt]);
-        optsRef.current.onAdded?.(evt); // only after a successful save
+          quantity: 1,
+          unit: spec.unit,
+          source: 'vision_scan',
+          ...(waterSafety ? { waterSafety } : {}),
+          // Assumed from the size chart; treated as full so it counts toward litres.
+          ...(spec.unitVolumeMl ? { unitVolumeMl: spec.unitVolumeMl, fillLevel: 'full' as const } : {}),
+        },
+      });
+      if (!r.ok) {
+        setError(r.error);
+        return;
       }
+      lastAddedName.current = spec.name;
+      clearedSinceAdd.current = false;
+      cooldownUntil.current = Date.now() + COOLDOWN_MS;
+      window.dispatchEvent(new Event(INVENTORY_CHANGED_EVENT));
+      const evt: LiveAddEvent = {
+        id: generateId('live'),
+        name: spec.name,
+        category: spec.category,
+        categoryLabel: categoryLabel(spec.category),
+        unitVolumeMl: spec.unitVolumeMl,
+        waterSafety,
+        at: Date.now(),
+      };
+      setAdded((a) => [...a, evt]);
+      optsRef.current.onAdded?.(evt); // only after a successful save
     } catch {
       if (runningRef.current) setError({ code: 'connection_failed', message: 'Network hiccup — retrying…' });
     } finally {
@@ -151,6 +189,16 @@ export function useLiveScan(opts: {
       setAnalyzing(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (!running) return;
+    const tick = setInterval(() => {
+      const left = Math.max(0, Math.ceil((cooldownUntil.current - Date.now()) / 1000));
+      setCooldown(left);
+      if (left > 0) setHint(`Added ✓  Next scan in ${left}…`);
+    }, 250);
+    return () => clearInterval(tick);
+  }, [running]);
 
   useEffect(() => {
     if (!running) return;
@@ -165,7 +213,13 @@ export function useLiveScan(opts: {
   const start = useCallback(() => {
     if (runningRef.current) return;
     sessionRef.current = generateId('ls');
-    present.current.clear();
+    cooldownUntil.current = 0;
+    lastAddedName.current = null;
+    clearedSinceAdd.current = true;
+    candidate.current = null;
+    unknownFrames.current = 0;
+    setHint('');
+    setCooldown(0);
     setAdded([]);
     setInView([]);
     setError(null);
@@ -184,5 +238,5 @@ export function useLiveScan(opts: {
     runningRef.current = false;
   }, []);
 
-  return { running, analyzing, inView, added, sealedConfirmed, setSealedConfirmed, error, start, stop };
+  return { hint, cooldown, running, analyzing, inView, added, sealedConfirmed, setSealedConfirmed, error, start, stop };
 }

@@ -85,5 +85,6 @@ export class EchoStorage {
     if (!this.isClient()) return;
     Object.values(STORAGE_KEYS).forEach((k) => localStorage.removeItem(k));
     localStorage.removeItem('echo_inventory_v1');
+    localStorage.removeItem('echo_user_name_v1');
   }
 }

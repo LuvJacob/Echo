@@ -1,5 +1,4 @@
 import { WATER_SAFETY_LABEL, type InventoryItem } from '@/types/echo';
-import { computeTotals, formatLiters, itemLiters } from '@/lib/inventory/totals';
 
 /**
  * Tool definitions shared by the Realtime session (executed in the browser against the
@@ -86,21 +85,38 @@ export interface InventoryToolOutput {
     category: string;
     quantity: number;
     unit: string;
-    unit_volume_ml: number | null;
-    fill_level: string | null;
     location: string | null;
-    liters: number | null;
     observations: string[];
     water_safety: string | null;
   }[];
   totals: {
-    water_liters: number;
-    water_liters_spoken: string;
+    /** e.g. "3 water bottles and 1 gallon jug of water" */
+    water_spoken: string;
     water_containers: number;
-    water_containers_unknown_volume: number;
+    water_by_type: Record<string, number>;
+    /** Containers flagged DO NOT DRINK (contaminated). */
+    unsafe_water_containers: number;
+    rations_items: number;
+    medical_items: number;
     total_items: number;
   };
   note: string;
+}
+
+/** "3 water bottles and 1 gallon jug of water" — counts only, never litres. */
+export function describeContainers(byType: Record<string, number>): string {
+  const parts = Object.entries(byType)
+    .filter(([, n]) => n > 0)
+    .map(([name, n]) => {
+      const lower = name.toLowerCase();
+      if (n === 1) return `1 ${lower}`;
+      // pluralise the head noun: "water bottle" → "water bottles", "gallon jug of water" → "gallon jugs of water"
+      const plural = lower.includes(' of ') ? lower.replace(/^(\S+(?: \S+)*?)( of .*)$/, (_, head, rest) => head.replace(/(\w+)$/, '$1s') + rest) : lower.replace(/(\w+)$/, '$1s');
+      return `${n} ${plural}`;
+    });
+  if (parts.length === 0) return 'no water containers';
+  if (parts.length === 1) return parts[0];
+  return parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1];
 }
 
 export function runGetInventory(items: InventoryItem[], args: unknown): InventoryToolOutput {
@@ -108,7 +124,10 @@ export function runGetInventory(items: InventoryItem[], args: unknown): Inventor
     typeof args === 'object' && args && 'category' in args && typeof (args as { category: unknown }).category === 'string'
       ? (args as { category: string }).category
       : null;
-  const t = computeTotals(items);
+  const water = items.filter((i) => i.category === 'water');
+  const byType: Record<string, number> = {};
+  for (const w of water) byType[w.name] = (byType[w.name] ?? 0) + w.quantity;
+  const count = (c: string) => items.filter((i) => i.category === c).reduce((n, i) => n + i.quantity, 0);
   return {
     items: items
       .filter((i) => !category || i.category === category)
@@ -117,23 +136,22 @@ export function runGetInventory(items: InventoryItem[], args: unknown): Inventor
         category: i.category,
         quantity: i.quantity,
         unit: i.unit,
-        unit_volume_ml: i.unitVolumeMl ?? null,
-        fill_level: i.fillLevel ?? null,
         location: i.location ?? null,
-        liters: itemLiters(i),
         observations: i.observations ?? [],
         water_safety: i.waterSafety ? WATER_SAFETY_LABEL[i.waterSafety] : null,
       })),
     totals: {
-      water_liters: t.waterLiters,
-      water_liters_spoken: formatLiters(t.waterLiters),
-      water_containers: t.waterContainers,
-      water_containers_unknown_volume: t.waterContainersUnknownVolume,
-      total_items: t.totalItems,
+      water_spoken: describeContainers(byType),
+      water_containers: water.reduce((n, i) => n + i.quantity, 0),
+      water_by_type: byType,
+      unsafe_water_containers: water.filter((i) => i.waterSafety === 'possible_contamination').reduce((n, i) => n + i.quantity, 0),
+      rations_items: count('food'),
+      medical_items: count('medical'),
+      total_items: items.reduce((n, i) => n + i.quantity, 0),
     },
     note:
-      'Totals are computed by the app from confirmed quantities, volumes and fill levels. Quote them exactly; do not recompute. ' +
-      'Containers with unknown volume are not included in water_liters. Drinkability is never confirmed.',
+      'Report water ONLY as a count of containers by type (use water_spoken). Never mention litres, millilitres or volume. ' +
+      'If unsafe_water_containers > 0, say how many are flagged DO NOT DRINK. Counts are computed by the app; quote them exactly.',
   };
 }
 
