@@ -65,6 +65,18 @@ export function useCameraCapture() {
     }
   }, []);
 
+  /** Current frame as a small JPEG data URL; the camera stays on (live scanning). */
+  const grabFrame = useCallback((maxDim = 640): string | null => {
+    const v = videoRef.current;
+    if (!v || !v.videoWidth || v.readyState < 2) return null;
+    const scale = Math.min(1, maxDim / Math.max(v.videoWidth, v.videoHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(v.videoWidth * scale);
+    canvas.height = Math.round(v.videoHeight * scale);
+    canvas.getContext('2d')?.drawImage(v, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.7);
+  }, []);
+
   /** Grab the current frame as a JPEG data URL and turn the camera off. */
   const capture = useCallback((): string | null => {
     const v = videoRef.current;
@@ -78,5 +90,5 @@ export function useCameraCapture() {
     return url;
   }, [stop]);
 
-  return { videoRef, active, starting, error, start, capture, stop, clearError: () => setError(null) };
+  return { videoRef, active, starting, error, start, capture, grabFrame, stop, clearError: () => setError(null) };
 }

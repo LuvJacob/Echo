@@ -4,7 +4,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useCameraCapture } from '@/hooks/useCameraCapture';
 import { Card, Button, Badge } from '@/components/ui';
 import type { UseSupplyScan } from '@/hooks/useSupplyScan';
-import type { FillLevel } from '@/types/echo';
+import { useLiveScan, type LiveAddEvent } from '@/hooks/useLiveScan';
+import { WATER_SAFETY_LABEL, type FillLevel } from '@/types/echo';
 import {
   Camera,
   Upload,
@@ -15,12 +16,14 @@ import {
   Scan,
   Droplet,
   Eye,
+  Radio,
 } from 'lucide-react';
 
 interface PhotoUploadModalProps {
   isOpen: boolean;
   onClose: () => void;
   scan: UseSupplyScan;
+  onLiveAdded?: (e: LiveAddEvent) => void;
 }
 
 const FILL_OPTIONS: { value: FillLevel | ''; label: string }[] = [
@@ -36,18 +39,34 @@ const inputCls =
   'w-full bg-echo-bg border border-echo-border rounded-md px-2 py-1.5 text-base sm:text-xs font-mono text-white focus:outline-none focus:border-echo-cyan';
 const labelCls = 'block text-[10px] font-mono text-echo-muted uppercase mb-1';
 
-export function PhotoUploadModal({ isOpen, onClose, scan }: PhotoUploadModalProps) {
+export function PhotoUploadModal({ isOpen, onClose, scan, onLiveAdded }: PhotoUploadModalProps) {
   const cameraRef = useRef<HTMLInputElement | null>(null);
   const uploadRef = useRef<HTMLInputElement | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [savedLiters, setSavedLiters] = useState<number | null>(null);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const camera = useCameraCapture();
+  const [liveMode, setLiveMode] = useState(false);
+  const live = useLiveScan({
+    grabFrame: () => camera.grabFrame(640),
+    onAdded: (e) => onLiveAdded?.(e),
+  });
+  const liveStart = live.start;
+  const liveStop = live.stop;
 
   // Turn the webcam off whenever the modal closes.
   useEffect(() => {
-    if (!isOpen) camera.stop();
-  }, [isOpen, camera.stop]);
+    if (!isOpen) {
+      liveStop();
+      camera.stop();
+      setLiveMode(false);
+    }
+  }, [isOpen, camera.stop, liveStop]);
+
+  // Start analysing once the camera is up in live mode.
+  useEffect(() => {
+    if (liveMode && camera.active && !live.running) liveStart();
+  }, [liveMode, camera.active, live.running, liveStart]);
 
   useEffect(() => {
     return () => {
@@ -63,13 +82,27 @@ export function PhotoUploadModal({ isOpen, onClose, scan }: PhotoUploadModalProp
     !!proposal && (status === 'review' || status === 'error' || status === 'saving');
   const showSavedBanner = savedLiters !== null;
   const showErrorNoProposal = status === 'error' && !proposal;
-  const showPicker = !isScanning && !showReview && !showSavedBanner && !showErrorNoProposal && !camera.active;
-  const showCamera = camera.active && !isScanning && !showReview;
+  const showPicker = !isScanning && !showReview && !showSavedBanner && !showErrorNoProposal && !camera.active && !liveMode;
+  const showLive = liveMode && !isScanning && !showReview;
+  const showCamera = camera.active && !liveMode && !isScanning && !showReview;
 
   const openCamera = async () => {
     const ok = await camera.start();
     // No usable camera API (e.g. phone over plain http) → native camera/file picker.
     if (!ok && !navigator.mediaDevices?.getUserMedia) cameraRef.current?.click();
+  };
+
+  const openLive = async () => {
+    setLiveMode(true);
+    const ok = await camera.start();
+    if (!ok) setLiveMode(false);
+  };
+
+  const finishLive = () => {
+    live.stop();
+    camera.stop();
+    setLiveMode(false);
+    onClose();
   };
 
   const snap = () => {
@@ -91,6 +124,8 @@ export function PhotoUploadModal({ isOpen, onClose, scan }: PhotoUploadModalProp
   };
 
   const handleClose = () => {
+    live.stop();
+    setLiveMode(false);
     camera.stop();
     if (timerRef.current) clearTimeout(timerRef.current);
     setSavedLiters(null);
@@ -181,6 +216,17 @@ export function PhotoUploadModal({ isOpen, onClose, scan }: PhotoUploadModalProp
                   type="button"
                   variant="primary"
                   size="md"
+                  onClick={openLive}
+                  disabled={camera.starting}
+                  className="text-xs font-bold"
+                >
+                  <Radio className="w-4 h-4 mr-1.5" />
+                  Live scan
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="md"
                   onClick={openCamera}
                   disabled={camera.starting}
                   className="text-xs font-bold"
@@ -224,6 +270,74 @@ export function PhotoUploadModal({ isOpen, onClose, scan }: PhotoUploadModalProp
               <Button type="button" variant="primary" size="md" onClick={snap} className="px-6 font-bold">
                 <Camera className="w-4 h-4 mr-1.5" />
                 Capture &amp; Scan
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Live scan */}
+        {showLive && (
+          <div className="mb-3 space-y-2">
+            <div className="rounded-xl border border-echo-cyan/40 bg-black relative overflow-hidden">
+              <video ref={camera.videoRef} playsInline muted autoPlay className="w-full max-h-[40vh] object-contain" />
+              <div className="pointer-events-none absolute top-2 left-2 w-5 h-5 border-t-2 border-l-2 border-echo-cyan" />
+              <div className="pointer-events-none absolute top-2 right-2 w-5 h-5 border-t-2 border-r-2 border-echo-cyan" />
+              <div className="pointer-events-none absolute bottom-2 left-2 w-5 h-5 border-b-2 border-l-2 border-echo-cyan" />
+              <div className="pointer-events-none absolute bottom-2 right-2 w-5 h-5 border-b-2 border-r-2 border-echo-cyan" />
+            </div>
+            <div className="flex items-center gap-2 text-[11px] font-mono font-bold text-echo-cyan animate-pulse">
+              {live.analyzing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              <span>LIVE — hold an item up to the camera</span>
+            </div>
+            {live.inView.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {live.inView.map((n, i) => (
+                  <span key={`${n}-${i}`} className="px-2 py-0.5 rounded border border-echo-cyan/40 bg-echo-cyan/10 text-[10px] font-mono text-echo-cyan">
+                    {n}
+                  </span>
+                ))}
+              </div>
+            )}
+            <label className="flex items-start gap-2 text-[11px] font-mono text-white cursor-pointer">
+              <input
+                type="checkbox"
+                checked={live.sealedConfirmed}
+                onChange={(e) => live.setSealedConfirmed(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>Water bottles are unopened &amp; factory-sealed</span>
+            </label>
+            {live.error && (
+              <div className="bg-echo-rose/15 border border-echo-rose/50 p-2.5 rounded-lg text-xs font-mono text-echo-rose">
+                {live.error.message}
+              </div>
+            )}
+            {live.added.length > 0 && (
+              <ul className="space-y-1 max-h-32 overflow-y-auto">
+                {[...live.added].reverse().map((a) => (
+                  <li key={a.id} className="text-[11px] font-mono text-white flex flex-wrap items-center gap-1.5">
+                    <span>✓ {a.name} → {a.categoryLabel}</span>
+                    {a.waterSafety && (
+                      <span
+                        className={`px-1.5 py-0.5 rounded border text-[9px] ${
+                          a.waterSafety === 'possible_contamination'
+                            ? 'border-echo-rose/50 bg-echo-rose/10 text-echo-rose'
+                            : a.waterSafety === 'safety_unknown'
+                              ? 'border-echo-amber/50 bg-echo-amber/10 text-echo-amber'
+                              : 'border-echo-emerald/50 bg-echo-emerald/10 text-echo-emerald'
+                        }`}
+                      >
+                        {WATER_SAFETY_LABEL[a.waterSafety]}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex justify-end">
+              <Button type="button" variant="primary" size="md" onClick={finishLive} className="px-6 font-bold">
+                <Check className="w-4 h-4 mr-1.5" />
+                Done
               </Button>
             </div>
           </div>

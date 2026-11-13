@@ -1,4 +1,4 @@
-import type { InventoryItem } from '@/types/echo';
+import { WATER_SAFETY_LABEL, type InventoryItem } from '@/types/echo';
 import { computeTotals, formatLiters, itemLiters } from '@/lib/inventory/totals';
 
 /**
@@ -48,6 +48,7 @@ export interface InventoryToolOutput {
     location: string | null;
     liters: number | null;
     observations: string[];
+    water_safety: string | null;
   }[];
   totals: {
     water_liters: number;
@@ -78,6 +79,7 @@ export function runGetInventory(items: InventoryItem[], args: unknown): Inventor
         location: i.location ?? null,
         liters: itemLiters(i),
         observations: i.observations ?? [],
+        water_safety: i.waterSafety ? WATER_SAFETY_LABEL[i.waterSafety] : null,
       })),
     totals: {
       water_liters: t.waterLiters,

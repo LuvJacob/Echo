@@ -61,6 +61,8 @@ export interface EchoVoice {
   sendText: (text: string) => Promise<void>;
   /** Give ECHO context (e.g. "photo scan proposed 3 bottles"); optionally have it respond aloud. */
   notify: (text: string, opts?: { respond?: boolean }) => void;
+  /** ECHO speaks this exact short line (e.g. "Water bottle added."). Queued if ECHO is mid-reply. */
+  say: (text: string) => void;
   /** Retry audio after an autoplay block ('playback_failed'). Call from a tap. */
   resumePlayback: () => Promise<void>;
   clearError: () => void;
@@ -125,6 +127,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
   const connectingRef = useRef<Promise<void> | null>(null);
   const handledCalls = useRef(new Set<string>());
   const responseActiveRef = useRef(false);
+  const sayQueueRef = useRef<string[]>([]);
 
   const setStatus = useCallback((s: VoiceStatus) => {
     statusRef.current = s;
@@ -248,6 +251,19 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
     if (dc && dc.readyState === 'open') dc.send(JSON.stringify(evt));
   }, []);
 
+  /** Out-of-band response: spoken but not added to the conversation history. */
+  const sendSay = (text: string) => {
+    responseActiveRef.current = true;
+    sendEvent({
+      type: 'response.create',
+      response: {
+        conversation: 'none',
+        output_modalities: ['audio'],
+        instructions: `Say exactly this, in your normal voice, and nothing else: "${text.replace(/"/g, "'")}"`,
+      },
+    });
+  };
+
   const handleRealtimeEvent = useCallback(
     (evt: Record<string, any>) => {
       switch (evt.type) {
@@ -284,6 +300,8 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
           break;
         case 'response.done': {
           responseActiveRef.current = false;
+          const queued = sayQueueRef.current.shift();
+          if (queued) sendSay(queued);
           const output: any[] = evt.response?.output ?? [];
           const calls = output.filter((o) => o.type === 'function_call' && !handledCalls.current.has(o.call_id));
           if (calls.length) {
@@ -709,6 +727,21 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
     [pipelineTurn, sendEvent, setStatus]
   );
 
+  const say = useCallback(
+    (text: string) => {
+      if (modeRef.current === 'realtime' && dcRef.current?.readyState === 'open') {
+        if (responseActiveRef.current || statusRef.current === 'listening') sayQueueRef.current.push(text);
+        else sendSay(text);
+        return;
+      }
+      // Pipeline or not connected yet: server TTS (falls back to browser speech).
+      upsertCaption(generateId('cap'), 'assistant', text, true);
+      void speakPipeline(text);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [speakPipeline, upsertCaption]
+  );
+
   const resumePlayback = useCallback(async () => {
     await ctxRef.current?.resume().catch(() => {});
     if (audioElRef.current) {
@@ -746,10 +779,11 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
       stopTalking,
       sendText,
       notify,
+      say,
       resumePlayback,
       clearError,
     }),
-    [mode, status, captions, error, amplitude, getAmplitude, playbackStream, audioElement, isMicHeld, connect, disconnect, startTalking, stopTalking, sendText, notify, resumePlayback, clearError]
+    [mode, status, captions, error, amplitude, getAmplitude, playbackStream, audioElement, isMicHeld, connect, disconnect, startTalking, stopTalking, sendText, notify, say, resumePlayback, clearError]
   );
 }
 

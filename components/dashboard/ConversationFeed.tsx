@@ -48,7 +48,7 @@ export function ConversationFeed({
   const samplePrompts = [
     'How much water do I have?',
     'Scan +3 water bottles into inventory',
-    'Report radiation status in Sector 4',
+    'Report (simulated) radiation status in Sector 4',
     'Emergency water purification protocol',
   ];
 

@@ -16,6 +16,7 @@ import { useInventory } from '@/hooks/useInventory';
 import { useEchoVoice } from '@/hooks/useEchoVoice';
 import { useSupplyScan } from '@/hooks/useSupplyScan';
 import { ChatMessage, AvatarStatus, InventoryItem } from '@/types/echo';
+import { confirmationPhrase } from '@/lib/inventory/live';
 import { InventoryService } from '@/lib/inventory/service';
 
 const GREETING: ChatMessage = {
@@ -228,6 +229,7 @@ export default function HomePage() {
         isOpen={isPhotoModalOpen}
         onClose={() => setIsPhotoModalOpen(false)}
         scan={scan}
+        onLiveAdded={(e) => voice.say(confirmationPhrase(e))}
       />
 
       <ManualAddItemModal

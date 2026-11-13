@@ -206,8 +206,14 @@ export class InventoryStore {
 
 // ---------- helpers ----------
 
-function mergeKey(i: Pick<InventoryItem, 'name' | 'unitVolumeMl' | 'fillLevel' | 'location'>) {
-  return [i.name.trim().toLowerCase(), i.unitVolumeMl ?? '', i.fillLevel ?? '', (i.location ?? '').trim().toLowerCase()].join('|');
+function mergeKey(i: Pick<InventoryItem, 'name' | 'unitVolumeMl' | 'fillLevel' | 'location' | 'waterSafety'>) {
+  return [
+    i.name.trim().toLowerCase(),
+    i.unitVolumeMl ?? '',
+    i.fillLevel ?? '',
+    (i.location ?? '').trim().toLowerCase(),
+    i.waterSafety ?? '',
+  ].join('|');
 }
 
 /** Merge quantity into a matching line (same name, volume, fill, location) or append. Returns the line id. */

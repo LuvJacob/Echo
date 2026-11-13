@@ -17,7 +17,7 @@ export function AlertTicker() {
     {
       id: 'alert-1',
       level: 'warning',
-      title: 'SOLAR RADIATION ELEVATED',
+      title: '[SIMULATED] SOLAR RADIATION ELEVATED',
       message: 'UV/Ionization index +18% above baseline in Sector 4. Limit unshielded exposure.',
       timestamp: '02M AGO',
     },
