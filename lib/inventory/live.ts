@@ -63,8 +63,7 @@ export function specFor(d: LiveDetection): LiveItemSpec {
       return { key: 'canned_food', name: 'Canned food', category: 'food', unit: 'cans' };
     case 'other_food': {
       const name = cleanName(d.name) || 'Food item';
-      // Dedupe by kind: the model names the same item differently frame to frame.
-      return { key: 'other_food', name, category: 'food', unit: 'items' };
+      return { key: `food:${name.toLowerCase()}`, name, category: 'food', unit: 'items' };
     }
     case 'unknown_item':
       // Not saved automatically — ECHO asks the survivor what it is.
@@ -73,7 +72,7 @@ export function specFor(d: LiveDetection): LiveItemSpec {
       return { key: 'bandages', name: 'Bandages', category: 'medical', unit: 'boxes' };
     case 'first_aid_other': {
       const name = cleanName(d.name) || 'First-aid item';
-      return { key: 'first_aid_other', name, category: 'medical', unit: 'units' };
+      return { key: `first_aid:${name.toLowerCase()}`, name, category: 'medical', unit: 'units' };
     }
   }
 }
@@ -98,6 +97,17 @@ export function confirmationPhrase(e: LiveAddEvent): string {
 
 export function categoryLabel(c: ItemCategory): string {
   return CATEGORY_LABEL[c] ?? c;
+}
+
+const GENERIC = new Set(['bag', 'can', 'cans', 'box', 'pack', 'bottle', 'bottles', 'jug', 'item', 'items', 'food', 'of', 'the', 'a', 'and', 'some', 'with', 'small', 'large']);
+
+/** Same item named differently ("Bag of red kidney beans" vs "Red kidney beans")? */
+export function similarItem(a: string, b: string): boolean {
+  const words = (s: string) => s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !GENERIC.has(w));
+  const A = words(a);
+  const B = new Set(words(b));
+  if (!A.length || !B.size) return a.trim().toLowerCase() === b.trim().toLowerCase();
+  return A.some((w) => B.has(w) || B.has(w.replace(/s$/, '')) || B.has(w + 's'));
 }
 
 function cleanName(s: string): string {

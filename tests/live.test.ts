@@ -36,3 +36,11 @@ test('water sizes: standard bottle 500 mL, gallon jug 3785 mL, label overrides',
   const l = specFor({ kind: 'water_bottle', name: '', waterAppearance: 'clear', waterSize: 'standard', labelMl: 591, confidence: 1 });
   assert.equal(l.unitVolumeMl, 591);
 });
+
+import { similarItem } from '@/lib/inventory/live';
+test('similar names count as the same item; different foods do not', () => {
+  assert.ok(similarItem('Bag of red kidney beans', 'Red kidney beans'));
+  assert.ok(similarItem('Water bottle', 'Water bottle'));
+  assert.ok(!similarItem('Bread', 'Red kidney beans'));
+  assert.ok(!similarItem('Canned food', 'Bandages'));
+});

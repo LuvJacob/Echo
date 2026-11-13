@@ -295,7 +295,7 @@ export function PhotoUploadModal({ isOpen, onClose, scan, onLiveAdded, voiceList
             </div>
             <div className="flex items-center gap-2 text-[11px] font-mono font-bold text-echo-cyan animate-pulse">
               {live.analyzing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              <span>LIVE — hold an item up to the camera</span>
+              <span>{live.hint || 'LIVE — hold an item up to the camera'}</span>
             </div>
             {voiceCaption && (
               <div className="rounded-lg border border-echo-cyan/40 bg-echo-cyan/10 p-2 text-[11px] font-mono text-echo-cyan">
