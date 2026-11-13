@@ -43,8 +43,11 @@ visible and prominent (e.g. being held up to the camera):
 - bandages: a box or pack of adhesive bandages / Band-Aids
 - first_aid_other: any other recognisable first-aid item (gauze, antiseptic, first-aid kit, medical tape...); give its short name
 Report each kind at most once. Ignore people, hands, screens, furniture and anything not on the list.
-water_appearance: for water_bottle, "cloudy_or_discolored" if the liquid looks cloudy, murky or tinted, else "clear";
-for everything else "not_applicable".
+water_appearance (water_bottle only): look at the LIQUID itself, compared with the label and background.
+Answer "cloudy_or_discolored" if it shows ANY of: a colour tint (green, yellow, brown, orange, pink…), cloudiness or
+milkiness, murkiness, floating particles, sediment, or film. Answer "clear" only if the liquid is plainly colourless and
+transparent. When unsure, answer "cloudy_or_discolored" (a false alarm is safer than a missed one).
+For everything else "not_applicable".
 water_size (water only, else "not_applicable"): "small" = 8–12 oz mini bottle; "standard" = ordinary single-serve
 bottle (16.9–20 oz, the usual "bottle of water"); "large" = 1–1.5 L bottle; "gallon_jug" = big jug with a handle.
 label_ml: the capacity printed on the label in mL if you can read it (1 gallon = 3785), else null.
