@@ -1,270 +1,67 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { AvatarStatus } from '@/types/echo';
 import { cn } from '@/lib/utils';
+import { AlertCircle, RefreshCw } from 'lucide-react';
 
 interface ThreeHoloAvatarProps {
   status: AvatarStatus;
   amplitude?: number; // 0 to 1 from voice audio
   className?: string;
+  modelUrl?: string;
 }
 
-/**
- * Creates an anatomical 3D Humanoid Head Geometry
- * with tagged vertex attributes for jaw movement and facial morphing.
- */
-function createHumanoidHeadGeometry(): {
-  geometry: THREE.BufferGeometry;
-  jawIndices: number[];
-  basePositions: Float32Array;
-} {
-  const uSegments = 54;
-  const vSegments = 46;
-  const positions: number[] = [];
-  const normals: number[] = [];
-  const uvs: number[] = [];
-  const jawWeights: number[] = []; // 1.0 for lower jaw/chin, 0.0 for cranium/upper face
+// Status-based sci-fi holographic color themes
+const STATUS_THEMES: Record<AvatarStatus, { primary: number; rim: number; ambient: number; glow: string }> = {
+  idle: {
+    primary: 0x00e5ff, // Cyan
+    rim: 0x38bdf8,
+    ambient: 0x082032,
+    glow: 'rgba(0, 229, 255, 0.45)',
+  },
+  listening: {
+    primary: 0x10b981, // Emerald green
+    rim: 0x34d399,
+    ambient: 0x06281e,
+    glow: 'rgba(16, 185, 129, 0.65)',
+  },
+  thinking: {
+    primary: 0xa855f7, // Violet/Purple
+    rim: 0xe879f9,
+    ambient: 0x200b3b,
+    glow: 'rgba(168, 85, 247, 0.7)',
+  },
+  speaking: {
+    primary: 0x38bdf8, // Electric Sky Blue
+    rim: 0x7dd3fc,
+    ambient: 0x092540,
+    glow: 'rgba(56, 189, 248, 0.9)',
+  },
+  error: {
+    primary: 0xf43f5e, // Rose/Red
+    rim: 0xfb7185,
+    ambient: 0x3b0a14,
+    glow: 'rgba(244, 63, 94, 0.8)',
+  },
+};
 
-  for (let j = 0; j <= vSegments; j++) {
-    const v = j / vSegments; // 0 (top of head) to 1 (base of neck)
-    const theta = (v - 0.5) * Math.PI; // -PI/2 to PI/2
-
-    for (let i = 0; i <= uSegments; i++) {
-      const u = i / uSegments; // 0 to 1 around head
-      const phi = u * Math.PI * 2; // 0 to 2PI
-
-      // Base sphere coordinate
-      const cosTheta = Math.cos(theta);
-      const sinTheta = Math.sin(theta);
-      const cosPhi = Math.cos(phi);
-      const sinPhi = Math.sin(phi);
-
-      let x = cosTheta * sinPhi;
-      let y = sinTheta;
-      let z = cosTheta * cosPhi;
-
-      // --- Anatomical Humanoid Facial Sculpting Formulations ---
-      // 1. Overall Head Proportion (Ellipsoid: taller than wide, deeper than wide)
-      x *= 0.92;
-      y *= 1.25;
-      z *= 1.05;
-
-      const isFront = z > 0;
-      const frontFactor = Math.max(0, z);
-
-      // 2. Forehead & Cranium: broader at top, tapering slightly to temples
-      if (y > 0.3) {
-        const topTaper = (y - 0.3) / 0.95;
-        x *= 1.0 - topTaper * 0.12;
-        z *= 1.0 - topTaper * 0.1;
-      }
-
-      // 3. Eye Orbit Recesses (y between 0.18 and 0.45, x between 0.2 and 0.6)
-      if (isFront && y > 0.15 && y < 0.48) {
-        const eyeXDist = Math.abs(x) - 0.42;
-        const eyeYDist = y - 0.32;
-        const eyeDistSq = eyeXDist * eyeXDist * 5.5 + eyeYDist * eyeYDist * 16.0;
-        if (eyeDistSq < 1.0) {
-          const orbitDepth = (1.0 - eyeDistSq) * 0.16 * frontFactor;
-          z -= orbitDepth;
-        }
-      }
-
-      // 4. Brow Ridge Prominence (y between 0.38 and 0.52)
-      if (isFront && y > 0.36 && y < 0.52) {
-        const browFactor = Math.sin(((y - 0.36) / 0.16) * Math.PI) * frontFactor;
-        z += browFactor * 0.09;
-      }
-
-      // 5. Cheekbone (Zygomatic Arch) Prominence (y between 0.0 and 0.25, lateral x)
-      if (isFront && y > -0.05 && y < 0.28) {
-        const cheekFactor = Math.sin(((y + 0.05) / 0.33) * Math.PI) * (Math.abs(x) * 0.65);
-        x *= 1.0 + cheekFactor * 0.14;
-        z += cheekFactor * 0.08 * frontFactor;
-      }
-
-      // 6. Nose Bridge & Nose Tip (y between -0.15 and 0.35, centered near x=0)
-      if (isFront && Math.abs(x) < 0.32 && y > -0.18 && y < 0.38) {
-        const noseXFactor = Math.cos((Math.abs(x) / 0.32) * (Math.PI / 2));
-        const noseYFactor = Math.sin(((y + 0.18) / 0.56) * Math.PI);
-        const noseProtrusion = noseXFactor * noseYFactor * 0.28;
-        z += noseProtrusion;
-
-        // Nose tip refinement at y = -0.08
-        if (y > -0.15 && y < 0.02 && Math.abs(x) < 0.18) {
-          const tipFactor = Math.cos((x / 0.18) * (Math.PI / 2)) * Math.sin(((y + 0.15) / 0.17) * Math.PI);
-          z += tipFactor * 0.12;
-        }
-      }
-
-      // 7. Philtrum & Upper Lip (y between -0.32 and -0.16)
-      if (isFront && y > -0.32 && y < -0.16 && Math.abs(x) < 0.35) {
-        const lipXFactor = Math.cos((x / 0.35) * (Math.PI / 2));
-        const upperLipFactor = Math.sin(((y + 0.32) / 0.16) * Math.PI) * lipXFactor;
-        z += upperLipFactor * 0.11;
-      }
-
-      // 8. Lower Lip, Chin & Mandible (y < -0.22)
-      let isJawVertex = 0.0;
-      if (y < -0.2) {
-        const jawProgress = Math.min(1.0, (-y - 0.2) / 0.7);
-        isJawVertex = isFront ? Math.min(1.0, jawProgress * (1.0 + frontFactor * 0.5)) : jawProgress * 0.4;
-
-        // Chin projection at y between -0.45 and -0.7
-        if (isFront && y > -0.72 && y < -0.42 && Math.abs(x) < 0.28) {
-          const chinXFactor = Math.cos((x / 0.28) * (Math.PI / 2));
-          const chinYFactor = Math.sin(((y + 0.72) / 0.3) * Math.PI);
-          z += chinXFactor * chinYFactor * 0.18;
-        }
-
-        // Jawline taper to chin
-        if (y > -0.75) {
-          const taper = (y + 0.2) / -0.55;
-          x *= 1.0 - taper * 0.22;
-        }
-      }
-
-      // 9. Neck Column (y < -0.75)
-      if (y <= -0.75) {
-        const neckFactor = (-y - 0.75) / 0.5;
-        x *= 0.65 + neckFactor * 0.1;
-        z = z * 0.65 - neckFactor * 0.1;
-        isJawVertex = 0.0; // Neck stays anchored
-      }
-
-      positions.push(x, y, z);
-      normals.push(x, y, z); // Initial approximations; will computeVertexNormals
-      uvs.push(u, v);
-      jawWeights.push(isJawVertex);
-    }
-  }
-
-  // Construct Index Buffer
-  const indices: number[] = [];
-  for (let j = 0; j < vSegments; j++) {
-    for (let i = 0; i < uSegments; i++) {
-      const a = j * (uSegments + 1) + i;
-      const b = (j + 1) * (uSegments + 1) + i;
-      const c = (j + 1) * (uSegments + 1) + (i + 1);
-      const d = j * (uSegments + 1) + (i + 1);
-
-      indices.push(a, b, d);
-      indices.push(b, c, d);
-    }
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  const posArray = new Float32Array(positions);
-  geometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
-  geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));
-  geometry.setAttribute('jawWeight', new THREE.BufferAttribute(new Float32Array(jawWeights), 1));
-  geometry.setIndex(indices);
-  geometry.computeVertexNormals();
-
-  const jawIndices: number[] = [];
-  for (let idx = 0; idx < jawWeights.length; idx++) {
-    if (jawWeights[idx] > 0.1) {
-      jawIndices.push(idx);
-    }
-  }
-
-  return {
-    geometry,
-    jawIndices,
-    basePositions: new Float32Array(posArray),
-  };
-}
-
-/**
- * Custom Hologram Shader with Fresnel Edge Glow, Scanlines & Interference
- */
-function createHologramMaterial(primaryColor: THREE.Color, secondaryColor: THREE.Color) {
-  return new THREE.ShaderMaterial({
-    uniforms: {
-      uTime: { value: 0 },
-      uColor: { value: primaryColor },
-      uRimColor: { value: secondaryColor },
-      uFresnelPower: { value: 2.2 },
-      uOpacity: { value: 0.85 },
-      uScanlineSpeed: { value: 1.8 },
-      uScanlineFreq: { value: 65.0 },
-      uNoiseIntensity: { value: 0.06 },
-    },
-    vertexShader: `
-      uniform float uTime;
-      uniform float uNoiseIntensity;
-      varying vec3 vNormal;
-      varying vec3 vViewPosition;
-      varying vec3 vWorldPosition;
-      varying vec2 vUv;
-
-      void main() {
-        vUv = uv;
-        vNormal = normalize(normalMatrix * normal);
-        
-        // Subtle holographic quantum jitter
-        vec3 pos = position;
-        float jitter = sin(pos.y * 30.0 + uTime * 6.0) * uNoiseIntensity * 0.012;
-        pos.x += jitter;
-
-        vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
-        vViewPosition = -mvPosition.xyz;
-        vWorldPosition = (modelMatrix * vec4(pos, 1.0)).xyz;
-        gl_Position = projectionMatrix * mvPosition;
-      }
-    `,
-    fragmentShader: `
-      uniform float uTime;
-      uniform vec3 uColor;
-      uniform vec3 uRimColor;
-      uniform float uFresnelPower;
-      uniform float uOpacity;
-      uniform float uScanlineSpeed;
-      uniform float uScanlineFreq;
-      varying vec3 vNormal;
-      varying vec3 vViewPosition;
-      varying vec3 vWorldPosition;
-      varying vec2 vUv;
-
-      void main() {
-        vec3 normal = normalize(vNormal);
-        vec3 viewDir = normalize(vViewPosition);
-
-        // 1. Fresnel Edge Glow (Classic Sci-Fi Hologram)
-        float NdotV = max(0.0, dot(normal, viewDir));
-        float fresnel = pow(1.0 - NdotV, uFresnelPower);
-
-        // 2. Vertical Moving Scanlines
-        float scanline = sin((vWorldPosition.y + uTime * 0.4) * uScanlineFreq) * 0.5 + 0.5;
-        scanline = pow(scanline, 1.4);
-
-        // 3. Grid Lattice Modulation
-        float lattice = sin(vUv.x * 120.0) * sin(vUv.y * 120.0);
-        lattice = smoothstep(0.4, 0.9, lattice) * 0.15;
-
-        // Composite Final Hologram Shading
-        vec3 baseGlow = uColor * (0.35 + scanline * 0.25 + lattice);
-        vec3 rimGlow = uRimColor * (fresnel * 1.6);
-        vec3 finalColor = baseGlow + rimGlow;
-
-        float alpha = clamp((fresnel * 0.9 + 0.22 + scanline * 0.15) * uOpacity, 0.0, 1.0);
-        gl_FragColor = vec4(finalColor, alpha);
-      }
-    `,
-    transparent: true,
-    blending: THREE.AdditiveBlending,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-  });
-}
-
-export function ThreeHoloAvatar({ status, amplitude = 0, className }: ThreeHoloAvatarProps) {
+export function ThreeHoloAvatar({
+  status,
+  amplitude = 0,
+  className,
+  modelUrl = '/avatars/echo-avatar.glb',
+}: ThreeHoloAvatarProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const statusRef = useRef(status);
   const ampRef = useRef(amplitude);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Keep refs synchronized without recreating the scene
   useEffect(() => {
     statusRef.current = status;
     ampRef.current = amplitude;
@@ -274,130 +71,98 @@ export function ThreeHoloAvatar({ status, amplitude = 0, className }: ThreeHoloA
     const container = containerRef.current;
     if (!container) return;
 
+    let isMounted = true;
+    let animationFrameId: number;
+
     // --- 1. Scene, Camera, WebGL Renderer ---
     const scene = new THREE.Scene();
 
-    const width = container.clientWidth || 500;
-    const height = container.clientHeight || 500;
+    const width = container.clientWidth || 440;
+    const height = container.clientHeight || 440;
 
-    const camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 100);
-    camera.position.set(0, 0.1, 3.8);
+    const camera = new THREE.PerspectiveCamera(36, width / height, 0.1, 50);
+    // Camera positioned at eye level framing head & upper neck
+    camera.position.set(0, 0, 0.72);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      powerPreference: 'high-performance',
+    });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setClearColor(0x000000, 0);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(renderer.domElement);
 
-    // --- 2. Color Palettes by Avatar Status ---
-    const getColors = (st: AvatarStatus) => {
-      switch (st) {
-        case 'listening':
-          return { primary: new THREE.Color(0x10b981), rim: new THREE.Color(0x34d399), light: 0x10b981 };
-        case 'thinking':
-          return { primary: new THREE.Color(0xa855f7), rim: new THREE.Color(0xe879f9), light: 0xa855f7 };
-        case 'speaking':
-          return { primary: new THREE.Color(0x00e5ff), rim: new THREE.Color(0x7dd3fc), light: 0x38bdf8 };
-        case 'error':
-          return { primary: new THREE.Color(0xf43f5e), rim: new THREE.Color(0xfb7185), light: 0xf43f5e };
-        case 'idle':
-        default:
-          return { primary: new THREE.Color(0x00e5ff), rim: new THREE.Color(0x38bdf8), light: 0x00e5ff };
-      }
-    };
+    // --- 2. Timer (Modern Three.js Timer replacing deprecated Clock) ---
+    const timer = new THREE.Timer();
 
-    const initialColors = getColors(statusRef.current);
+    // --- 3. Studio & Holographic Lighting Rig ---
+    const initialTheme = STATUS_THEMES[statusRef.current] || STATUS_THEMES.idle;
 
-    // --- 3. Build 3D Humanoid Head Mesh ---
-    const { geometry: headGeom, jawIndices, basePositions } = createHumanoidHeadGeometry();
-    const holoMaterial = createHologramMaterial(initialColors.primary, initialColors.rim);
-    const headMesh = new THREE.Mesh(headGeom, holoMaterial);
-    headMesh.position.set(0, 0.15, 0);
-    scene.add(headMesh);
+    // Key Light (crisp studio key light from top-front)
+    const keyLight = new THREE.DirectionalLight(0xf0f9ff, 1.4);
+    keyLight.position.set(0.3, 0.6, 0.9);
+    scene.add(keyLight);
 
-    // Wireframe Overlay Layer (Fine Cyber-Tessellation)
-    const wireframeMat = new THREE.MeshBasicMaterial({
-      color: initialColors.rim,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.14,
-      blending: THREE.AdditiveBlending,
-    });
-    const wireMesh = new THREE.Mesh(headGeom, wireframeMat);
-    wireMesh.position.set(0, 0.15, 0);
-    scene.add(wireMesh);
+    // Fill Light (cool holographic fill)
+    const fillLight = new THREE.DirectionalLight(0x38bdf8, 0.7);
+    fillLight.position.set(-0.5, 0.2, 0.7);
+    scene.add(fillLight);
 
-    // --- 4. 3D Cybernetic Ocular Lenses (Eyes) ---
-    const eyeGroup = new THREE.Group();
-    const eyeGeom = new THREE.SphereGeometry(0.082, 24, 24);
-    const eyeMat = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0.95,
-      blending: THREE.AdditiveBlending,
-    });
-    const irisMat = new THREE.MeshBasicMaterial({
-      color: initialColors.primary,
-      transparent: true,
-      opacity: 0.85,
-      blending: THREE.AdditiveBlending,
-    });
+    // Rim / Back Silhouette Light (distinct sci-fi edge glow)
+    const rimLight = new THREE.DirectionalLight(initialTheme.rim, 3.8);
+    rimLight.position.set(0, 0.6, -0.7);
+    scene.add(rimLight);
 
-    const leftEye = new THREE.Mesh(eyeGeom, irisMat);
-    leftEye.position.set(-0.38, 0.32, 0.44);
-    const rightEye = new THREE.Mesh(eyeGeom, irisMat);
-    rightEye.position.set(0.38, 0.32, 0.44);
+    // Soft Projector Uplight
+    const bottomLight = new THREE.DirectionalLight(initialTheme.primary, 0.6);
+    bottomLight.position.set(0, -0.6, 0.3);
+    scene.add(bottomLight);
 
-    const leftPupil = new THREE.Mesh(new THREE.SphereGeometry(0.038, 16, 16), eyeMat);
-    leftPupil.position.set(0, 0, 0.06);
-    leftEye.add(leftPupil);
+    // Ambient Lighting (balanced contrast)
+    const ambientLight = new THREE.AmbientLight(initialTheme.ambient, 1.0);
+    scene.add(ambientLight);
 
-    const rightPupil = new THREE.Mesh(new THREE.SphereGeometry(0.038, 16, 16), eyeMat);
-    rightPupil.position.set(0, 0, 0.06);
-    rightEye.add(rightPupil);
+    // Vocal Core Internal Light (soft glow scaling with amplitude)
+    const vocalLight = new THREE.PointLight(initialTheme.primary, 1.0, 1.5);
+    vocalLight.position.set(0, -0.1, 0.3);
+    scene.add(vocalLight);
 
-    eyeGroup.add(leftEye);
-    eyeGroup.add(rightEye);
-    eyeGroup.position.set(0, 0.15, 0);
-    scene.add(eyeGroup);
-
-    // --- 5. 3D Holographic Neural Particle Constellation ---
-    const particleCount = 750;
+    // --- 4. Hologram Background Particles (Behind Head) ---
+    const particleCount = 350;
     const particlePositions = new Float32Array(particleCount * 3);
-    const particleSpeeds = new Float32Array(particleCount);
     for (let i = 0; i < particleCount; i++) {
-      const u = Math.random();
-      const v = Math.random();
-      const theta = u * 2.0 * Math.PI;
-      const phi = Math.acos(2.0 * v - 1.0);
-      const r = 1.05 + Math.random() * 0.45;
-      const sinPhi = Math.sin(phi);
-      particlePositions[i * 3] = r * sinPhi * Math.cos(theta) * 0.95;
-      particlePositions[i * 3 + 1] = r * Math.cos(phi) * 1.25 + 0.15;
-      particlePositions[i * 3 + 2] = r * sinPhi * Math.sin(theta) * 1.05;
-      particleSpeeds[i] = 0.4 + Math.random() * 0.8;
+      const theta = Math.random() * 2 * Math.PI;
+      const r = 0.35 + Math.random() * 0.45;
+      particlePositions[i * 3] = Math.cos(theta) * r;
+      particlePositions[i * 3 + 1] = (Math.random() - 0.4) * 0.7;
+      particlePositions[i * 3 + 2] = -0.15 - Math.random() * 0.5; // Behind the head
     }
     const particleGeom = new THREE.BufferGeometry();
     particleGeom.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
     const particleMat = new THREE.PointsMaterial({
-      color: initialColors.rim,
-      size: 0.024,
+      color: initialTheme.rim,
+      size: 0.008,
       transparent: true,
-      opacity: 0.65,
+      opacity: 0.55,
       blending: THREE.AdditiveBlending,
     });
     const particlePoints = new THREE.Points(particleGeom, particleMat);
     scene.add(particlePoints);
 
-    // --- 6. 3D Projector Podium Floor Rings (X-Z plane below head) ---
+    // --- 5. Projector Floor Rings (Beneath Hologram) ---
     const projectorGroup = new THREE.Group();
-    projectorGroup.position.set(0, -1.35, 0);
+    projectorGroup.position.set(0, -0.36, 0);
 
-    const ringGeom1 = new THREE.RingGeometry(0.9, 0.92, 64);
+    const ringGeom1 = new THREE.RingGeometry(0.24, 0.244, 64);
     const ringMat1 = new THREE.MeshBasicMaterial({
-      color: initialColors.primary,
+      color: initialTheme.primary,
       transparent: true,
-      opacity: 0.5,
+      opacity: 0.45,
       side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending,
     });
@@ -405,11 +170,11 @@ export function ThreeHoloAvatar({ status, amplitude = 0, className }: ThreeHoloA
     ringMesh1.rotation.x = Math.PI / 2;
     projectorGroup.add(ringMesh1);
 
-    const ringGeom2 = new THREE.RingGeometry(1.2, 1.22, 64);
+    const ringGeom2 = new THREE.RingGeometry(0.32, 0.323, 64);
     const ringMat2 = new THREE.MeshBasicMaterial({
-      color: initialColors.rim,
+      color: initialTheme.rim,
       transparent: true,
-      opacity: 0.35,
+      opacity: 0.25,
       side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending,
     });
@@ -419,16 +184,91 @@ export function ThreeHoloAvatar({ status, amplitude = 0, className }: ThreeHoloA
 
     scene.add(projectorGroup);
 
-    // --- 7. Internal Vocal Resonance Core Light ---
-    const vocalLight = new THREE.PointLight(initialColors.light, 1.5, 3.5);
-    vocalLight.position.set(0, -0.15, 0.4);
-    scene.add(vocalLight);
+    // --- 6. Avatar Rig & Morph Target Animation State ---
+    const avatarGroup = new THREE.Group();
+    scene.add(avatarGroup);
 
-    const cranialLight = new THREE.PointLight(initialColors.light, 2.0, 4.0);
-    cranialLight.position.set(0, 0.6, 0.2);
-    scene.add(cranialLight);
+    interface MorphMesh {
+      mesh: THREE.Mesh;
+      dict: Record<string, number>;
+    }
+    const morphMeshes: MorphMesh[] = [];
+    const originalMaterials: Array<{ material: THREE.MeshStandardMaterial; mesh: THREE.Mesh }> = [];
 
-    // --- 8. Mouse & Head Interaction Tracking ---
+    // Current morph target values for smooth spring-like dampening
+    const currentMorphs = {
+      jawOpen: 0,
+      mouthOpen: 0,
+      viseme_aa: 0,
+      viseme_O: 0,
+      eyeBlinkLeft: 0,
+      eyeBlinkRight: 0,
+      mouthSmileLeft: 0.1,
+      mouthSmileRight: 0.1,
+      browInnerUp: 0,
+    };
+
+    // Load GLTF / GLB Humanoid Avatar Model
+    const loader = new GLTFLoader();
+    loader.load(
+      modelUrl,
+      (gltf) => {
+        if (!isMounted) return;
+
+        const model = gltf.scene;
+
+        // Position model so head center (~y: 1.58 in model space) is at (0, 0, 0) in scene
+        model.position.set(0, -1.58, 0);
+        model.scale.set(1.0, 1.0, 1.0);
+
+        // Process meshes and apply restrained holographic PBR styling
+        model.traverse((child) => {
+          if ((child as THREE.Mesh).isMesh) {
+            const mesh = child as THREE.Mesh;
+
+            // Cache morph target dictionaries
+            if (mesh.morphTargetDictionary && mesh.morphTargetInfluences) {
+              morphMeshes.push({
+                mesh,
+                dict: mesh.morphTargetDictionary,
+              });
+            }
+
+            // Style materials: retain diffuse textures, normals & roughness,
+            // but add restrained holographic transparency and emissive tint
+            if (mesh.material) {
+              const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+              mats.forEach((mat) => {
+                if ((mat as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
+                  const stdMat = mat as THREE.MeshStandardMaterial;
+                  stdMat.transparent = true;
+                  stdMat.opacity = 0.96;
+                  stdMat.depthWrite = true;
+                  stdMat.roughness = Math.max(0.4, stdMat.roughness || 0.6);
+                  stdMat.emissive = new THREE.Color(initialTheme.primary);
+                  stdMat.emissiveIntensity = 0.04;
+
+                  originalMaterials.push({ material: stdMat, mesh });
+                }
+              });
+            }
+          }
+        });
+
+        avatarGroup.add(model);
+        setIsLoading(false);
+      },
+      undefined,
+      (err) => {
+        console.warn('Failed to load humanoid avatar model:', err);
+        if (isMounted) {
+          setLoadError('Unable to load 3D holographic avatar asset.');
+          setIsLoading(false);
+        }
+      }
+    );
+
+    // --- 7. Mouse Cursor Parallax Tracking ---
     const mouse = { x: 0, y: 0, targetX: 0, targetY: 0 };
     const handleMouseMove = (e: MouseEvent) => {
       const rect = container.getBoundingClientRect();
@@ -439,146 +279,178 @@ export function ThreeHoloAvatar({ status, amplitude = 0, className }: ThreeHoloA
     };
     window.addEventListener('mousemove', handleMouseMove);
 
-    // --- 9. Resize Observer ---
+    // --- 8. Responsive Resize Handling ---
     const handleResize = () => {
       if (!container) return;
-      const w = container.clientWidth || 500;
-      const h = container.clientHeight || 500;
+      const w = container.clientWidth || 440;
+      const h = container.clientHeight || 440;
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
     };
     window.addEventListener('resize', handleResize);
 
-    // --- 10. Animation Loop ---
-    let animationFrameId: number;
-    let clock = new THREE.Clock();
+    // --- 9. Animation Loop ---
+    const animate = (timestamp?: number) => {
+      // Update Three.js Timer
+      timer.update(timestamp);
+      const elapsedTime = timer.getElapsed();
 
-    const animate = () => {
-      const elapsedTime = clock.getElapsedTime();
       const currentStatus = statusRef.current;
       const currentAmp = ampRef.current;
+      const theme = STATUS_THEMES[currentStatus] || STATUS_THEMES.idle;
 
-      // Update shader uniforms
-      holoMaterial.uniforms.uTime.value = elapsedTime;
+      // Dynamic Lighting & Hologram Material Color Interpolation
+      const targetRim = new THREE.Color(theme.rim);
+      const targetPrimary = new THREE.Color(theme.primary);
+      const targetAmbient = new THREE.Color(theme.ambient);
 
-      // Dynamic Color Interpolation on Status Change
-      const targetColors = getColors(currentStatus);
-      holoMaterial.uniforms.uColor.value.lerp(targetColors.primary, 0.08);
-      holoMaterial.uniforms.uRimColor.value.lerp(targetColors.rim, 0.08);
-      wireframeMat.color.lerp(targetColors.rim, 0.08);
-      irisMat.color.lerp(targetColors.primary, 0.08);
-      particleMat.color.lerp(targetColors.rim, 0.08);
-      ringMat1.color.lerp(targetColors.primary, 0.08);
-      ringMat2.color.lerp(targetColors.rim, 0.08);
-      vocalLight.color.lerp(new THREE.Color(targetColors.light), 0.08);
-      cranialLight.color.lerp(new THREE.Color(targetColors.light), 0.08);
+      rimLight.color.lerp(targetRim, 0.08);
+      bottomLight.color.lerp(targetPrimary, 0.08);
+      ambientLight.color.lerp(targetAmbient, 0.08);
+      vocalLight.color.lerp(targetPrimary, 0.08);
+      ringMat1.color.lerp(targetPrimary, 0.08);
+      ringMat2.color.lerp(targetRim, 0.08);
+      particleMat.color.lerp(targetRim, 0.08);
+
+      originalMaterials.forEach(({ material }) => {
+        material.emissive.lerp(targetPrimary, 0.08);
+      });
 
       // Smooth Mouse Tracking Rotation
-      mouse.x += (mouse.targetX - mouse.x) * 0.05;
-      mouse.y += (mouse.targetY - mouse.y) * 0.05;
+      mouse.x += (mouse.targetX - mouse.x) * 0.06;
+      mouse.y += (mouse.targetY - mouse.y) * 0.06;
 
-      // Organic Idle Breathing & Floating Motion
-      const floatY = Math.sin(elapsedTime * 1.6) * 0.038;
-      const idleTilt = Math.sin(elapsedTime * 0.8) * 0.02;
+      // Natural Humanoid Floating & Breathing Micro-motion
+      const breathing = Math.sin(elapsedTime * 1.6) * 0.005;
+      const idleSway = Math.sin(elapsedTime * 0.9) * 0.015;
 
-      headMesh.position.y = 0.15 + floatY;
-      wireMesh.position.y = 0.15 + floatY;
-      eyeGroup.position.y = 0.15 + floatY;
+      avatarGroup.position.y = breathing;
+      const targetRotY = mouse.x * 0.22 + idleSway;
+      const targetRotX = -mouse.y * 0.12 + Math.sin(elapsedTime * 0.8) * 0.008;
 
-      const targetRotY = mouse.x * 0.28 + Math.sin(elapsedTime * 0.5) * 0.06;
-      const targetRotX = -mouse.y * 0.18 + idleTilt;
+      avatarGroup.rotation.y += (targetRotY - avatarGroup.rotation.y) * 0.08;
+      avatarGroup.rotation.x += (targetRotX - avatarGroup.rotation.x) * 0.08;
 
-      headMesh.rotation.y += (targetRotY - headMesh.rotation.y) * 0.08;
-      headMesh.rotation.x += (targetRotX - headMesh.rotation.x) * 0.08;
-      wireMesh.rotation.y = headMesh.rotation.y;
-      wireMesh.rotation.x = headMesh.rotation.x;
-      eyeGroup.rotation.y = headMesh.rotation.y;
-      eyeGroup.rotation.x = headMesh.rotation.x;
-
-      // --- Real-time 3D Jaw & Mouth Articulation ---
+      // --- Morph Target Speech & Facial Animation ---
       const isSpeaking = currentStatus === 'speaking';
+      const isListening = currentStatus === 'listening';
+      const isThinking = currentStatus === 'thinking';
+
+      // Amplitude-driven jaw & mouth opening
       const effectiveAmp = isSpeaking ? Math.max(0.12, Math.min(1.0, currentAmp)) : 0;
-      const jawDropAmount = effectiveAmp * 0.16;
+      const targetJaw = effectiveAmp * 0.85;
+      const targetMouth = effectiveAmp * 0.65;
+      const targetVisemeAa = effectiveAmp * 0.45;
+      const targetVisemeO = effectiveAmp * 0.35;
 
-      // Update positions buffer for articulated lower jaw
-      const posAttr = headGeom.attributes.position;
-      const jawAttr = headGeom.attributes.jawWeight;
-      const count = posAttr.count;
+      // Natural Blink Cycle (every 4.2 seconds)
+      const blinkCycle = elapsedTime % 4.2;
+      const isBlinking = blinkCycle > 4.05;
+      const targetBlink = isBlinking ? 1.0 : isThinking ? 0.2 : 0.0;
 
-      for (let i = 0; i < count; i++) {
-        const weight = jawAttr.getX(i);
-        if (weight > 0.05) {
-          const baseY = basePositions[i * 3 + 1];
-          const baseZ = basePositions[i * 3 + 2];
-          // Displace jaw downwards and slightly backwards around TMJ hinge
-          posAttr.setY(i, baseY - jawDropAmount * weight);
-          posAttr.setZ(i, baseZ - jawDropAmount * 0.25 * weight);
-        }
-      }
-      posAttr.needsUpdate = true;
-      headGeom.computeVertexNormals();
+      // Facial Expression by State
+      const targetSmile = isSpeaking ? 0.2 : isListening ? 0.15 : 0.08;
+      const targetBrow = isListening ? 0.3 : isThinking ? -0.2 : 0.0;
 
-      // Vocal Light Intensity Driven by Amplitude
-      vocalLight.intensity = isSpeaking ? 1.0 + effectiveAmp * 3.5 : 0.6;
+      // Smooth interpolation for morph values
+      currentMorphs.jawOpen += (targetJaw - currentMorphs.jawOpen) * 0.25;
+      currentMorphs.mouthOpen += (targetMouth - currentMorphs.mouthOpen) * 0.25;
+      currentMorphs.viseme_aa += (targetVisemeAa - currentMorphs.viseme_aa) * 0.25;
+      currentMorphs.viseme_O += (targetVisemeO - currentMorphs.viseme_O) * 0.25;
+      currentMorphs.eyeBlinkLeft += (targetBlink - currentMorphs.eyeBlinkLeft) * 0.4;
+      currentMorphs.eyeBlinkRight += (targetBlink - currentMorphs.eyeBlinkRight) * 0.4;
+      currentMorphs.mouthSmileLeft += (targetSmile - currentMorphs.mouthSmileLeft) * 0.1;
+      currentMorphs.mouthSmileRight += (targetSmile - currentMorphs.mouthSmileRight) * 0.1;
+      currentMorphs.browInnerUp += (targetBrow - currentMorphs.browInnerUp) * 0.1;
 
-      // Micro-Blink scale on pupils/eyes
-      const blinkCycle = elapsedTime % 4.5;
-      const isBlinking = blinkCycle > 4.35;
-      const eyeScaleY = isBlinking ? 0.1 : 1.0;
-      leftEye.scale.y += (eyeScaleY - leftEye.scale.y) * 0.3;
-      rightEye.scale.y += (eyeScaleY - rightEye.scale.y) * 0.3;
+      // Apply morph values to all rigged meshes
+      morphMeshes.forEach(({ mesh, dict }) => {
+        if (!mesh.morphTargetInfluences) return;
 
-      // Orbit Neural Particles
-      const rotSpeed = currentStatus === 'thinking' ? 0.015 : 0.003;
+        const setTarget = (name: string, value: number) => {
+          const idx = dict[name];
+          if (idx !== undefined && mesh.morphTargetInfluences) {
+            mesh.morphTargetInfluences[idx] = Math.max(0, Math.min(1, value));
+          }
+        };
+
+        setTarget('jawOpen', currentMorphs.jawOpen);
+        setTarget('mouthOpen', currentMorphs.mouthOpen);
+        setTarget('viseme_aa', currentMorphs.viseme_aa);
+        setTarget('viseme_O', currentMorphs.viseme_O);
+        setTarget('eyeBlinkLeft', currentMorphs.eyeBlinkLeft);
+        setTarget('eyeBlinkRight', currentMorphs.eyeBlinkRight);
+        setTarget('mouthSmileLeft', currentMorphs.mouthSmileLeft);
+        setTarget('mouthSmileRight', currentMorphs.mouthSmileRight);
+        setTarget('browInnerUp', Math.max(0, currentMorphs.browInnerUp));
+        setTarget('browDownLeft', Math.max(0, -currentMorphs.browInnerUp));
+        setTarget('browDownRight', Math.max(0, -currentMorphs.browInnerUp));
+      });
+
+      // Vocal Core Light Pulse Driven by Speech Amplitude
+      vocalLight.intensity = isSpeaking ? 1.5 + effectiveAmp * 3.5 : 1.2;
+
+      // Orbit Neural Particle Cloud
+      const rotSpeed = isThinking ? 0.012 : 0.003;
       particlePoints.rotation.y += rotSpeed;
-      particlePoints.position.y = floatY * 0.5;
 
-      // Rotate Projector Floor Rings
-      ringMesh1.rotation.z += 0.005;
+      // Rotate Floor Projector Rings
+      ringMesh1.rotation.z += 0.004;
       ringMesh2.rotation.z -= 0.003;
 
       renderer.render(scene, camera);
       animationFrameId = requestAnimationFrame(animate);
     };
 
-    animate();
+    animationFrameId = requestAnimationFrame(animate);
 
+    // --- 10. Cleanup ---
     return () => {
+      isMounted = false;
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('resize', handleResize);
-      if (container && renderer.domElement) {
+
+      if (container && renderer.domElement && container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }
-      geometryDispose(headGeom);
-      geometryDispose(eyeGeom);
-      geometryDispose(particleGeom);
-      geometryDispose(ringGeom1);
-      geometryDispose(ringGeom2);
-      materialDispose(holoMaterial);
-      materialDispose(wireframeMat);
-      materialDispose(eyeMat);
-      materialDispose(irisMat);
-      materialDispose(particleMat);
-      materialDispose(ringMat1);
-      materialDispose(ringMat2);
+
+      particleGeom.dispose();
+      particleMat.dispose();
+      ringGeom1.dispose();
+      ringMat1.dispose();
+      ringGeom2.dispose();
+      ringMat2.dispose();
       renderer.dispose();
     };
-  }, []);
+  }, [modelUrl]);
 
   return (
     <div
       ref={containerRef}
       className={cn('relative w-full h-full flex items-center justify-center overflow-hidden', className)}
-    />
+    >
+      {/* Loading Placeholder */}
+      {isLoading && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center space-y-2 pointer-events-none z-10">
+          <RefreshCw className="w-6 h-6 text-echo-cyan animate-spin opacity-80" />
+          <span className="text-[10px] font-mono uppercase tracking-widest text-echo-cyan/70">
+            INITIALIZING HOLOGRAPHIC MATRIX
+          </span>
+        </div>
+      )}
+
+      {/* Graceful Fallback if 3D Asset Loading Fails */}
+      {loadError && (
+        <div className="absolute inset-4 flex flex-col items-center justify-center p-4 rounded-2xl bg-echo-surface/90 border border-echo-rose/40 text-center space-y-2 z-20">
+          <AlertCircle className="w-8 h-8 text-echo-rose animate-pulse" />
+          <p className="text-xs font-mono font-semibold text-echo-rose">{loadError}</p>
+          <span className="text-[10px] font-mono text-echo-muted">
+            AUDIO & TACTICAL PROTOCOLS REMAIN FULLY OPERATIONAL
+          </span>
+        </div>
+      )}
+    </div>
   );
-}
-
-function geometryDispose(g: THREE.BufferGeometry) {
-  g.dispose();
-}
-
-function materialDispose(m: THREE.Material) {
-  m.dispose();
 }
