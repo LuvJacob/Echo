@@ -17,6 +17,7 @@ import { useEchoVoice } from '@/hooks/useEchoVoice';
 import { useSupplyScan } from '@/hooks/useSupplyScan';
 import { ChatMessage, AvatarStatus, InventoryItem } from '@/types/echo';
 import { confirmationPhrase } from '@/lib/inventory/live';
+import { setPendingSealQuestion } from '@/lib/inventory/sealQuestion';
 import { InventoryService } from '@/lib/inventory/service';
 
 const GREETING: ChatMessage = {
@@ -229,7 +230,18 @@ export default function HomePage() {
         isOpen={isPhotoModalOpen}
         onClose={() => setIsPhotoModalOpen(false)}
         scan={scan}
-        onLiveAdded={(e) => voice.say(confirmationPhrase(e))}
+        onLiveAdded={(e) => {
+          if (e.category === 'water' && e.waterSafety === 'safety_unknown') {
+            // Ask live; the spoken yes/no is recorded by the set_water_sealed tool.
+            setPendingSealQuestion(e);
+            void voice.ask(
+              `${e.name} added. Is it unopened and factory-sealed?`,
+              `Live scan just added one "${e.name}" (${e.unitVolumeMl ?? '?'} mL). You are asking whether it is unopened and factory-sealed. When the survivor answers, call set_water_sealed with their answer.`
+            );
+          } else {
+            void voice.say(confirmationPhrase(e));
+          }
+        }}
       />
 
       <ManualAddItemModal

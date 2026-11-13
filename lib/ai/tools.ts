@@ -35,7 +35,23 @@ export const GET_WEATHER_TOOL = {
   parameters: { type: 'object', additionalProperties: false, properties: {}, required: [] },
 } as const;
 
+export const SET_WATER_SEALED_TOOL = {
+  type: 'function',
+  name: 'set_water_sealed',
+  description:
+    'Record the survivor\'s spoken answer to "Is it unopened and factory-sealed?" for the water bottle the live scanner just added.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    properties: { sealed: { type: 'boolean', description: 'true if they said yes, it is unopened and factory-sealed' } },
+    required: ['sealed'],
+  },
+} as const;
+
+/** Server-executable tools (/api/chat). */
 export const ECHO_TOOLS = [GET_INVENTORY_TOOL, GET_WEATHER_TOOL];
+/** Realtime voice session tools (executed in the browser). */
+export const REALTIME_TOOLS = [GET_INVENTORY_TOOL, GET_WEATHER_TOOL, SET_WATER_SEALED_TOOL];
 
 export interface InventoryToolOutput {
   items: {

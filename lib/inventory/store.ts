@@ -197,6 +197,22 @@ export class InventoryStore {
     return saved.ok ? { ok: true, value: items } : saved;
   }
 
+  /** Move ONE unit from the last line matching `match` into a line with `patch` applied (e.g. sealed → preferred). */
+  reclassifyOne(match: (i: InventoryItem) => boolean, patch: Partial<InventoryItem>, now = Date.now()): EchoResult<InventoryItem> {
+    const state = this.read();
+    const items = state.items.map((i) => ({ ...i }));
+    let idx = -1;
+    for (let k = items.length - 1; k >= 0; k--) if (match(items[k])) { idx = k; break; }
+    if (idx < 0) return { ok: false, error: { code: 'proposal_not_found', message: 'That item is no longer in inventory.' } };
+    const src = items[idx];
+    if (src.quantity <= 1) items.splice(idx, 1);
+    else items[idx] = { ...src, quantity: src.quantity - 1, updatedAt: now };
+    const moved: InventoryItem = { ...src, ...patch, id: generateId('item'), quantity: 1, updatedAt: now };
+    const id = mergeInto(items, moved, now);
+    const saved = this.write({ ...state, items });
+    return saved.ok ? { ok: true, value: items.find((i) => i.id === id) ?? moved } : saved;
+  }
+
   replaceAll(items: InventoryItem[]): EchoResult<InventoryItem[]> {
     const state = this.read();
     const saved = this.write({ ...state, items });

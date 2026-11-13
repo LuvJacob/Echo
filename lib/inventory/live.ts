@@ -3,12 +3,26 @@ import { CATEGORY_LABEL, type ItemCategory, type WaterSafety } from '@/types/ech
 /** Kinds the live scanner recognises. Anything else is ignored. */
 export type LiveKind = 'water_bottle' | 'canned_food' | 'bandages' | 'first_aid_other';
 export type WaterAppearance = 'clear' | 'cloudy_or_discolored' | 'not_applicable';
+/** Size classes from the team's reference chart. */
+export type WaterSize = 'small' | 'standard' | 'large' | 'gallon_jug' | 'not_applicable';
+
+/** Assumed capacity per size class (a printed label, if legible, overrides this). */
+export const WATER_SIZE_ML: Record<Exclude<WaterSize, 'not_applicable'>, number> = {
+  small: 355, // 8–12 oz
+  standard: 500, // 16.9 oz — "a bottle of water"
+  large: 1000, // 1–1.5 L
+  gallon_jug: 3785, // 1 US gallon
+};
 
 export interface LiveDetection {
   kind: LiveKind;
   /** Model's name; only used for first_aid_other (e.g. "Gauze pads"). */
   name: string;
   waterAppearance: WaterAppearance;
+  /** Size class for water containers. */
+  waterSize?: WaterSize;
+  /** Capacity printed on the label in mL, if legible. */
+  labelMl?: number | null;
   confidence: number;
 }
 
@@ -16,6 +30,8 @@ export interface LiveAddEvent {
   id: string;
   name: string;
   categoryLabel: string;
+  category?: ItemCategory;
+  unitVolumeMl?: number;
   waterSafety?: WaterSafety;
   at: number;
 }
@@ -25,12 +41,24 @@ export interface LiveItemSpec {
   name: string;
   category: ItemCategory;
   unit: string;
+  unitVolumeMl?: number;
 }
 
 export function specFor(d: LiveDetection): LiveItemSpec {
   switch (d.kind) {
-    case 'water_bottle':
-      return { key: 'water_bottle', name: 'Water bottle', category: 'water', unit: 'bottles' };
+    case 'water_bottle': {
+      const size = d.waterSize && d.waterSize !== 'not_applicable' ? d.waterSize : 'standard';
+      const label = d.labelMl && d.labelMl > 0 && d.labelMl <= 20000 ? Math.round(d.labelMl) : null;
+      const ml = label ?? WATER_SIZE_ML[size];
+      const jug = size === 'gallon_jug' || ml >= 3000;
+      return {
+        key: `water:${ml}`,
+        name: jug ? 'Gallon jug of water' : 'Water bottle',
+        category: 'water',
+        unit: jug ? 'jugs' : 'bottles',
+        unitVolumeMl: ml,
+      };
+    }
     case 'canned_food':
       return { key: 'canned_food', name: 'Canned food', category: 'food', unit: 'cans' };
     case 'bandages':

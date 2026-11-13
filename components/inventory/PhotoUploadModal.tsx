@@ -298,15 +298,9 @@ export function PhotoUploadModal({ isOpen, onClose, scan, onLiveAdded }: PhotoUp
                 ))}
               </div>
             )}
-            <label className="flex items-start gap-2 text-[11px] font-mono text-white cursor-pointer">
-              <input
-                type="checkbox"
-                checked={live.sealedConfirmed}
-                onChange={(e) => live.setSealedConfirmed(e.target.checked)}
-                className="mt-0.5"
-              />
-              <span>Water bottles are unopened &amp; factory-sealed</span>
-            </label>
+            <p className="text-[10px] font-mono text-echo-muted">
+              ECHO will ask out loud if a clear bottle is factory-sealed — hold the mic and answer yes or no.
+            </p>
             {live.error && (
               <div className="bg-echo-rose/15 border border-echo-rose/50 p-2.5 rounded-lg text-xs font-mono text-echo-rose">
                 {live.error.message}

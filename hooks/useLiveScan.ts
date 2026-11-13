@@ -110,6 +110,8 @@ export function useLiveScan(opts: { grabFrame: () => string | null; onAdded?: (e
             unit: spec.unit,
             source: 'vision_scan',
             ...(waterSafety ? { waterSafety } : {}),
+            // Assumed from the size chart; treated as full so it counts toward litres.
+            ...(spec.unitVolumeMl ? { unitVolumeMl: spec.unitVolumeMl, fillLevel: 'full' as const } : {}),
           },
         });
         if (!r.ok) {
@@ -118,7 +120,15 @@ export function useLiveScan(opts: { grabFrame: () => string | null; onAdded?: (e
           continue;
         }
         window.dispatchEvent(new Event(INVENTORY_CHANGED_EVENT));
-        const evt: LiveAddEvent = { id: generateId('live'), name: spec.name, categoryLabel: categoryLabel(spec.category), waterSafety, at: Date.now() };
+        const evt: LiveAddEvent = {
+          id: generateId('live'),
+          name: spec.name,
+          category: spec.category,
+          categoryLabel: categoryLabel(spec.category),
+          unitVolumeMl: spec.unitVolumeMl,
+          waterSafety,
+          at: Date.now(),
+        };
         setAdded((a) => [...a, evt]);
         optsRef.current.onAdded?.(evt); // only after a successful save
       }

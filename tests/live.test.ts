@@ -25,3 +25,14 @@ test('spoken confirmations', () => {
   assert.equal(confirmationPhrase({ ...base, name: 'Canned food', categoryLabel: 'Rations' }), 'Canned food added to rations.');
   assert.equal(confirmationPhrase({ ...base, name: 'Bandages', categoryLabel: 'Medical supplies' }), 'Bandages added to medical supplies.');
 });
+
+test('water sizes: standard bottle 500 mL, gallon jug 3785 mL, label overrides', () => {
+  const b = specFor({ kind: 'water_bottle', name: '', waterAppearance: 'clear', waterSize: 'standard', labelMl: null, confidence: 1 });
+  assert.equal(b.unitVolumeMl, 500);
+  assert.equal(b.name, 'Water bottle');
+  const j = specFor({ kind: 'water_bottle', name: '', waterAppearance: 'clear', waterSize: 'gallon_jug', labelMl: null, confidence: 1 });
+  assert.equal(j.unitVolumeMl, 3785);
+  assert.equal(j.name, 'Gallon jug of water');
+  const l = specFor({ kind: 'water_bottle', name: '', waterAppearance: 'clear', waterSize: 'standard', labelMl: 591, confidence: 1 });
+  assert.equal(l.unitVolumeMl, 591);
+});

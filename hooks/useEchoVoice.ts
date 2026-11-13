@@ -5,6 +5,7 @@ import type { AvatarStatus, EchoError, EchoErrorCode, ChatApiResponse } from '@/
 import { InventoryService } from '@/lib/inventory/service';
 import { parseToolArgs, runGetInventory } from '@/lib/ai/tools';
 import { fetchWeather, getBrowserLocation } from '@/lib/ai/weather';
+import { answerSealQuestion } from '@/lib/inventory/sealQuestion';
 import { generateId } from '@/lib/utils';
 
 /**
@@ -63,6 +64,8 @@ export interface EchoVoice {
   notify: (text: string, opts?: { respond?: boolean }) => void;
   /** ECHO speaks this exact short line (e.g. "Water bottle added."). Queued if ECHO is mid-reply. */
   say: (text: string) => void;
+  /** ECHO asks this question in-conversation (so it understands the spoken answer). `context` is hidden guidance. */
+  ask: (question: string, context?: string) => void;
   /** Retry audio after an autoplay block ('playback_failed'). Call from a tap. */
   resumePlayback: () => Promise<void>;
   clearError: () => void;
@@ -315,7 +318,9 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
                     ? runGetInventory(InventoryService.list(), parseToolArgs(c.arguments))
                     : c.name === 'get_weather'
                       ? await fetchWeather(await getBrowserLocation())
-                      : { error: `Unknown tool ${c.name}` };
+                      : c.name === 'set_water_sealed'
+                        ? answerSealQuestion(parseToolArgs(c.arguments))
+                        : { error: `Unknown tool ${c.name}` };
                 sendEvent({
                   type: 'conversation.item.create',
                   item: { type: 'function_call_output', call_id: c.call_id, output: JSON.stringify(result) },
@@ -727,8 +732,32 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
     [pipelineTurn, sendEvent, setStatus]
   );
 
+  const ask = useCallback(
+    async (question: string, context?: string) => {
+      if (statusRef.current === 'disconnected' || statusRef.current === 'error') await connect();
+      if (modeRef.current === 'realtime' && dcRef.current?.readyState === 'open') {
+        if (context) {
+          sendEvent({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: context }] } });
+        }
+        if (responseActiveRef.current) sendEvent({ type: 'response.cancel' });
+        responseActiveRef.current = true;
+        sendEvent({
+          type: 'response.create',
+          response: { instructions: `Say exactly this and nothing else: "${question.replace(/"/g, "'")}"` },
+        });
+        return;
+      }
+      upsertCaption(generateId('cap'), 'assistant', question, true);
+      void speakPipeline(question);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [connect, speakPipeline, upsertCaption]
+  );
+
   const say = useCallback(
-    (text: string) => {
+    async (text: string) => {
+      // Connect the live session first so confirmations use ECHO's real voice.
+      if (statusRef.current === 'disconnected' || statusRef.current === 'error') await connect();
       if (modeRef.current === 'realtime' && dcRef.current?.readyState === 'open') {
         if (responseActiveRef.current || statusRef.current === 'listening') sayQueueRef.current.push(text);
         else sendSay(text);
@@ -739,7 +768,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
       void speakPipeline(text);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [speakPipeline, upsertCaption]
+    [connect, speakPipeline, upsertCaption]
   );
 
   const resumePlayback = useCallback(async () => {
@@ -780,10 +809,11 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
       sendText,
       notify,
       say,
+      ask,
       resumePlayback,
       clearError,
     }),
-    [mode, status, captions, error, amplitude, getAmplitude, playbackStream, audioElement, isMicHeld, connect, disconnect, startTalking, stopTalking, sendText, notify, say, resumePlayback, clearError]
+    [mode, status, captions, error, amplitude, getAmplitude, playbackStream, audioElement, isMicHeld, connect, disconnect, startTalking, stopTalking, sendText, notify, say, ask, resumePlayback, clearError]
   );
 }
 

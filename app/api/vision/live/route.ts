@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { MODELS, createResponse, getOpenAIKey, outputText } from '@/lib/ai/openai';
 import { validateImageDataUrl } from '@/lib/ai/vision';
-import type { LiveDetection, LiveKind, WaterAppearance } from '@/lib/inventory/live';
+import type { LiveDetection, LiveKind, WaterAppearance, WaterSize } from '@/lib/inventory/live';
 
 export const runtime = 'nodejs';
 export const maxDuration = 20;
 
 const KINDS: LiveKind[] = ['water_bottle', 'canned_food', 'bandages', 'first_aid_other'];
 const APPEARANCES: WaterAppearance[] = ['clear', 'cloudy_or_discolored', 'not_applicable'];
+const SIZES: WaterSize[] = ['small', 'standard', 'large', 'gallon_jug', 'not_applicable'];
 
 const SCHEMA = {
   type: 'object',
@@ -20,11 +21,13 @@ const SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['kind', 'name', 'water_appearance', 'confidence'],
+        required: ['kind', 'name', 'water_appearance', 'water_size', 'label_ml', 'confidence'],
         properties: {
           kind: { type: 'string', enum: KINDS },
           name: { type: 'string', description: 'Short item name, e.g. "Gauze pads" (only matters for first_aid_other).' },
           water_appearance: { type: 'string', enum: APPEARANCES },
+          water_size: { type: 'string', enum: SIZES },
+          label_ml: { type: ['number', 'null'], description: 'Capacity printed on the label in mL, only if legible.' },
           confidence: { type: 'number' },
         },
       },
@@ -41,7 +44,11 @@ visible and prominent (e.g. being held up to the camera):
 - first_aid_other: any other recognisable first-aid item (gauze, antiseptic, first-aid kit, medical tape...); give its short name
 Report each kind at most once. Ignore people, hands, screens, furniture and anything not on the list.
 water_appearance: for water_bottle, "cloudy_or_discolored" if the liquid looks cloudy, murky or tinted, else "clear";
-for everything else "not_applicable". If nothing on the list is visible, return an empty items array.
+for everything else "not_applicable".
+water_size (water only, else "not_applicable"): "small" = 8–12 oz mini bottle; "standard" = ordinary single-serve
+bottle (16.9–20 oz, the usual "bottle of water"); "large" = 1–1.5 L bottle; "gallon_jug" = big jug with a handle.
+label_ml: the capacity printed on the label in mL if you can read it (1 gallon = 3785), else null.
+If nothing on the list is visible, return an empty items array.
 `.trim();
 
 /** POST /api/vision/live — one camera frame → recognised kinds. Never writes inventory. */
@@ -105,10 +112,14 @@ function parseLive(raw: string): LiveDetection[] | null {
     if (!KINDS.includes(o.kind as LiveKind)) return null;
     if (!APPEARANCES.includes(o.water_appearance as WaterAppearance)) return null;
     if (typeof o.name !== 'string' || typeof o.confidence !== 'number') return null;
+    if (!SIZES.includes(o.water_size as WaterSize)) return null;
+    if (o.label_ml !== null && typeof o.label_ml !== 'number') return null;
     out.push({
       kind: o.kind as LiveKind,
       name: o.name,
       waterAppearance: o.water_appearance as WaterAppearance,
+      waterSize: o.water_size as WaterSize,
+      labelMl: o.label_ml as number | null,
       confidence: Math.max(0, Math.min(1, o.confidence)),
     });
   }
