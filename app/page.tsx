@@ -21,6 +21,7 @@ import { setPendingSealQuestion, setPendingUnknownQuestion, setUnknownResolver }
 import { UNKNOWN_ITEM_NAME } from '@/lib/ai/schemas';
 import { getUserName, greetingFor } from '@/lib/memory/profile';
 import { InventoryService } from '@/lib/inventory/service';
+import { EchoStorage } from '@/lib/storage/localStorage';
 
 const GREETING: ChatMessage = {
   id: 'greeting',
@@ -69,6 +70,16 @@ export default function HomePage() {
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scan.status, scan.proposal]);
+
+  // ---- Demo reset: open /?reset to wipe inventory, saved name and history on this browser ----
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has('reset')) {
+      try {
+        EchoStorage.clearAll();
+      } catch {}
+      window.location.replace(window.location.pathname);
+    }
+  }, []);
 
   // ---- Greeting by name (remembered in this browser) ----
   const [userName, setUserNameState] = useState<string | null>(null);
