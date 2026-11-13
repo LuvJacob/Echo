@@ -24,6 +24,10 @@ interface PhotoUploadModalProps {
   onClose: () => void;
   scan: UseSupplyScan;
   onLiveAdded?: (e: LiveAddEvent) => void;
+  /** [Person B] True while ECHO's mic is open (e.g. waiting for a spoken yes/no). */
+  voiceListening?: boolean;
+  /** [Person B] ECHO's latest spoken line, shown as a caption inside the scanner. */
+  voiceCaption?: string;
 }
 
 const FILL_OPTIONS: { value: FillLevel | ''; label: string }[] = [
@@ -39,7 +43,7 @@ const inputCls =
   'w-full bg-echo-bg border border-echo-border rounded-md px-2 py-1.5 text-base sm:text-xs font-mono text-white focus:outline-none focus:border-echo-cyan';
 const labelCls = 'block text-[10px] font-mono text-echo-muted uppercase mb-1';
 
-export function PhotoUploadModal({ isOpen, onClose, scan, onLiveAdded }: PhotoUploadModalProps) {
+export function PhotoUploadModal({ isOpen, onClose, scan, onLiveAdded, voiceListening, voiceCaption }: PhotoUploadModalProps) {
   const cameraRef = useRef<HTMLInputElement | null>(null);
   const uploadRef = useRef<HTMLInputElement | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -289,6 +293,16 @@ export function PhotoUploadModal({ isOpen, onClose, scan, onLiveAdded }: PhotoUp
               {live.analyzing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               <span>LIVE — hold an item up to the camera</span>
             </div>
+            {voiceCaption && (
+              <div className="rounded-lg border border-echo-cyan/40 bg-echo-cyan/10 p-2 text-[11px] font-mono text-echo-cyan">
+                ECHO: {voiceCaption}
+              </div>
+            )}
+            {voiceListening && (
+              <div className="flex items-center gap-2 rounded-lg border border-echo-emerald/60 bg-echo-emerald/15 p-2 text-xs font-mono font-bold text-echo-emerald animate-pulse">
+                🎙 Listening for your answer… just say “yes” or “no”
+              </div>
+            )}
             {live.inView.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {live.inView.map((n, i) => (

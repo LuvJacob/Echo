@@ -131,6 +131,10 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
   const handledCalls = useRef(new Set<string>());
   const responseActiveRef = useRef(false);
   const sayQueueRef = useRef<string[]>([]);
+  /** Hands-free answer window after ECHO asks a question (no button needed). */
+  const awaitingAnswerRef = useRef(false);
+  const handsFreeRef = useRef(false);
+  const handsFreeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const setStatus = useCallback((s: VoiceStatus) => {
     statusRef.current = s;
@@ -254,6 +258,40 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
     if (dc && dc.readyState === 'open') dc.send(JSON.stringify(evt));
   }, []);
 
+  /** Open the mic with server voice-activity detection so the survivor can just answer out loud. */
+  const startHandsFree = () => {
+    if (modeRef.current !== 'realtime' || handsFreeRef.current) return;
+    handsFreeRef.current = true;
+    sendEvent({ type: 'input_audio_buffer.clear' });
+    sendEvent({
+      type: 'session.update',
+      session: {
+        type: 'realtime',
+        audio: {
+          input: {
+            turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 600, create_response: true, interrupt_response: true },
+          },
+        },
+      },
+    });
+    micRef.current?.getAudioTracks().forEach((t) => (t.enabled = true));
+    setMicHeld(true);
+    setStatus('listening');
+    handsFreeTimer.current = setTimeout(() => endHandsFree(), 8000); // no answer → close the mic
+  };
+
+  /** Back to push-to-talk. */
+  const endHandsFree = () => {
+    if (!handsFreeRef.current) return;
+    handsFreeRef.current = false;
+    if (handsFreeTimer.current) clearTimeout(handsFreeTimer.current);
+    handsFreeTimer.current = null;
+    micRef.current?.getAudioTracks().forEach((t) => (t.enabled = false));
+    setMicHeld(false);
+    sendEvent({ type: 'session.update', session: { type: 'realtime', audio: { input: { turn_detection: null } } } });
+    if (statusRef.current === 'listening') setStatus('ready');
+  };
+
   /** Out-of-band response: spoken but not added to the conversation history. */
   const sendSay = (text: string) => {
     responseActiveRef.current = true;
@@ -292,14 +330,25 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
           break;
         case 'response.created':
           responseActiveRef.current = true;
+          if (handsFreeRef.current) endHandsFree(); // the server heard the answer and is replying
           if (statusRef.current !== 'listening') setStatus('thinking');
           break;
         case 'output_audio_buffer.started':
           setStatus('speaking');
           break;
+        case 'input_audio_buffer.speech_started':
+          if (handsFreeRef.current && handsFreeTimer.current) {
+            clearTimeout(handsFreeTimer.current); // they're answering; let them finish
+            handsFreeTimer.current = setTimeout(() => endHandsFree(), 15000);
+          }
+          break;
         case 'output_audio_buffer.stopped':
         case 'output_audio_buffer.cleared':
           if (statusRef.current === 'speaking') setStatus('ready');
+          if (awaitingAnswerRef.current && evt.type === 'output_audio_buffer.stopped') {
+            awaitingAnswerRef.current = false;
+            startHandsFree();
+          }
           break;
         case 'response.done': {
           responseActiveRef.current = false;
@@ -607,6 +656,8 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
     holdStartRef.current = performance.now();
 
     if (modeRef.current === 'realtime') {
+      if (handsFreeRef.current) endHandsFree();
+      awaitingAnswerRef.current = false;
       // barge-in: stop ECHO talking
       if (statusRef.current === 'speaking' || statusRef.current === 'thinking') {
         if (responseActiveRef.current) sendEvent({ type: 'response.cancel' });
@@ -741,6 +792,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
         }
         if (responseActiveRef.current) sendEvent({ type: 'response.cancel' });
         responseActiveRef.current = true;
+        awaitingAnswerRef.current = true; // open the mic when the question finishes playing
         sendEvent({
           type: 'response.create',
           response: { instructions: `Say exactly this and nothing else: "${question.replace(/"/g, "'")}"` },

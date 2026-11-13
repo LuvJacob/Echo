@@ -230,6 +230,8 @@ export default function HomePage() {
         isOpen={isPhotoModalOpen}
         onClose={() => setIsPhotoModalOpen(false)}
         scan={scan}
+        voiceListening={voice.status === 'listening'}
+        voiceCaption={[...voice.captions].reverse().find((c) => c.role === 'assistant')?.text}
         onLiveAdded={(e) => {
           if (e.category === 'water' && e.waterSafety === 'safety_unknown') {
             // Ask live; the spoken yes/no is recorded by the set_water_sealed tool.
