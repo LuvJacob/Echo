@@ -270,7 +270,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
         type: 'realtime',
         audio: {
           input: {
-            turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 600, create_response: true, interrupt_response: true },
+            turn_detection: { type: 'server_vad', threshold: 0.65, prefix_padding_ms: 300, silence_duration_ms: 800, create_response: true, interrupt_response: true },
           },
         },
       },
@@ -278,7 +278,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
     micRef.current?.getAudioTracks().forEach((t) => (t.enabled = true));
     setMicHeld(true);
     setStatus('listening');
-    handsFreeTimer.current = setTimeout(() => endHandsFree(), 8000); // no answer → close the mic
+    handsFreeTimer.current = setTimeout(() => endHandsFree(), 10000); // no answer → close the mic
   };
 
   /** Back to push-to-talk. */
@@ -291,6 +291,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
     setMicHeld(false);
     sendEvent({ type: 'session.update', session: { type: 'realtime', audio: { input: { turn_detection: null } } } });
     if (statusRef.current === 'listening') setStatus('ready');
+    setTimeout(flushSay, 0); // play any confirmations that queued while we listened
   };
 
   /** Out-of-band response: spoken but not added to the conversation history. */
@@ -301,10 +302,18 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
       type: 'response.create',
       response: {
         conversation: 'none',
+        input: [], // no history: ECHO must not drift back to an earlier topic
         output_modalities: ['audio'],
-        instructions: `Say exactly this and nothing else: "${text.replace(/"/g, "'")}".${tone}`,
+        instructions: `You are a text-to-speech voice. Say exactly this line and nothing else: "${text.replace(/"/g, "'")}".${tone}`,
       },
     });
+  };
+
+  /** Play the next queued line if ECHO is free (not replying, not listening). */
+  const flushSay = () => {
+    if (responseActiveRef.current || statusRef.current === 'listening' || handsFreeRef.current) return;
+    const next = sayQueueRef.current.shift();
+    if (next) sendSay(next.text, next.urgent);
   };
 
   const handleRealtimeEvent = useCallback(
@@ -350,12 +359,13 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
           if (awaitingAnswerRef.current && evt.type === 'output_audio_buffer.stopped') {
             awaitingAnswerRef.current = false;
             startHandsFree();
+          } else {
+            flushSay();
           }
           break;
         case 'response.done': {
           responseActiveRef.current = false;
-          const queued = sayQueueRef.current.shift();
-          if (queued) sendSay(queued.text, queued.urgent);
+          setTimeout(flushSay, 0); // after this event's state updates
           const output: any[] = evt.response?.output ?? [];
           const calls = output.filter((o) => o.type === 'function_call' && !handledCalls.current.has(o.call_id));
           if (calls.length) {
@@ -793,16 +803,19 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
     async (question: string, context?: string) => {
       if (statusRef.current === 'disconnected' || statusRef.current === 'error') await connect();
       if (modeRef.current === 'realtime' && dcRef.current?.readyState === 'open') {
-        if (context) {
-          sendEvent({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: context }] } });
-        }
-        if (responseActiveRef.current) sendEvent({ type: 'response.cancel' });
-        responseActiveRef.current = true;
-        awaitingAnswerRef.current = true; // open the mic when the question finishes playing
+        // The model needs to know what was asked so it understands the spoken answer.
         sendEvent({
-          type: 'response.create',
-          response: { instructions: `Say exactly this and nothing else: "${question.replace(/"/g, "'")}"` },
+          type: 'conversation.item.create',
+          item: {
+            type: 'message',
+            role: 'system',
+            content: [{ type: 'input_text', text: `You just asked the survivor: "${question}". ${context ?? ''} Only answer about this question.` }],
+          },
         });
+        if (responseActiveRef.current) sendEvent({ type: 'response.cancel' });
+        sayQueueRef.current = []; // stale confirmations would talk over the question
+        awaitingAnswerRef.current = true; // open the mic when the question finishes playing
+        sendSay(question);
         return;
       }
       upsertCaption(generateId('cap'), 'assistant', question, true);

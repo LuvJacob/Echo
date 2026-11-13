@@ -63,7 +63,8 @@ export function specFor(d: LiveDetection): LiveItemSpec {
       return { key: 'canned_food', name: 'Canned food', category: 'food', unit: 'cans' };
     case 'other_food': {
       const name = cleanName(d.name) || 'Food item';
-      return { key: `food:${name.toLowerCase()}`, name, category: 'food', unit: 'items' };
+      // Dedupe by kind: the model names the same item differently frame to frame.
+      return { key: 'other_food', name, category: 'food', unit: 'items' };
     }
     case 'unknown_item':
       // Not saved automatically — ECHO asks the survivor what it is.
@@ -72,7 +73,7 @@ export function specFor(d: LiveDetection): LiveItemSpec {
       return { key: 'bandages', name: 'Bandages', category: 'medical', unit: 'boxes' };
     case 'first_aid_other': {
       const name = cleanName(d.name) || 'First-aid item';
-      return { key: `first_aid:${name.toLowerCase()}`, name, category: 'medical', unit: 'units' };
+      return { key: 'first_aid_other', name, category: 'medical', unit: 'units' };
     }
   }
 }

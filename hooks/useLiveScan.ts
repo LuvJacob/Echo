@@ -30,7 +30,9 @@ export interface UseLiveScan {
 const FRAME_INTERVAL_MS = 1500;
 const MIN_CONFIDENCE = 0.6;
 /** Frames an item must be missing before it can be counted again (so holding it up adds it once). */
-const FRAMES_TO_FORGET = 2;
+const FRAMES_TO_FORGET = 3;
+/** After adding an item, the same kind can't be added again for this long (flaky detections). */
+const READD_COOLDOWN_MS = 8000;
 
 /**
  * Live camera scanning: analyses a frame every ~1.5 s and adds each recognised item ONCE per
@@ -59,6 +61,7 @@ export function useLiveScan(opts: {
   const seqRef = useRef(0);
   /** dedupe key → consecutive frames missing */
   const present = useRef(new Map<string, number>());
+  const lastAddedAt = useRef(new Map<string, number>());
 
   const setSealedConfirmed = useCallback((v: boolean) => {
     sealedRef.current = v;
@@ -105,6 +108,7 @@ export function useLiveScan(opts: {
       for (const [key, d] of seen) {
         if (present.current.has(key)) continue;
         present.current.set(key, 0);
+        if (Date.now() - (lastAddedAt.current.get(key) ?? 0) < READD_COOLDOWN_MS) continue;
         const spec = specFor(d);
         if (d.kind === 'unknown_item') {
           optsRef.current.onUnknown?.();
@@ -131,6 +135,7 @@ export function useLiveScan(opts: {
           setError(r.error);
           continue;
         }
+        lastAddedAt.current.set(key, Date.now());
         window.dispatchEvent(new Event(INVENTORY_CHANGED_EVENT));
         const evt: LiveAddEvent = {
           id: generateId('live'),
@@ -166,6 +171,7 @@ export function useLiveScan(opts: {
     if (runningRef.current) return;
     sessionRef.current = generateId('ls');
     present.current.clear();
+    lastAddedAt.current.clear();
     setAdded([]);
     setInView([]);
     setError(null);
