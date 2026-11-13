@@ -10,7 +10,7 @@ export const MODELS = {
   vision: process.env.OPENAI_VISION_MODEL || 'gpt-4.1-mini',
   transcribe: process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-4o-mini-transcribe',
   tts: process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts',
-  ttsVoice: process.env.OPENAI_TTS_VOICE || 'onyx',
+  ttsVoice: process.env.OPENAI_TTS_VOICE || 'marin', // same voice as the realtime session
 };
 
 const BASE = 'https://api.openai.com/v1';

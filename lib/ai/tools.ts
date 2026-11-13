@@ -1,4 +1,4 @@
-import type { InventoryItem } from '@/types/echo';
+import { WATER_SAFETY_LABEL, type InventoryItem } from '@/types/echo';
 import { computeTotals, formatLiters, itemLiters } from '@/lib/inventory/totals';
 
 /**
@@ -26,7 +26,32 @@ export const GET_INVENTORY_TOOL = {
   },
 } as const;
 
-export const ECHO_TOOLS = [GET_INVENTORY_TOOL];
+export const GET_WEATHER_TOOL = {
+  type: 'function',
+  name: 'get_weather',
+  description:
+    'Get LIVE current weather and today\'s forecast where the survivor is (real data, not part of the fictional scenario). ' +
+    'Call this for any question about weather, temperature, rain, wind or whether conditions are safe to travel.',
+  parameters: { type: 'object', additionalProperties: false, properties: {}, required: [] },
+} as const;
+
+export const SET_WATER_SEALED_TOOL = {
+  type: 'function',
+  name: 'set_water_sealed',
+  description:
+    'Record the survivor\'s spoken answer to "Is it unopened and factory-sealed?" for the water bottle the live scanner just added.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    properties: { sealed: { type: 'boolean', description: 'true if they said yes, it is unopened and factory-sealed' } },
+    required: ['sealed'],
+  },
+} as const;
+
+/** Server-executable tools (/api/chat). */
+export const ECHO_TOOLS = [GET_INVENTORY_TOOL, GET_WEATHER_TOOL];
+/** Realtime voice session tools (executed in the browser). */
+export const REALTIME_TOOLS = [GET_INVENTORY_TOOL, GET_WEATHER_TOOL, SET_WATER_SEALED_TOOL];
 
 export interface InventoryToolOutput {
   items: {
@@ -39,6 +64,7 @@ export interface InventoryToolOutput {
     location: string | null;
     liters: number | null;
     observations: string[];
+    water_safety: string | null;
   }[];
   totals: {
     water_liters: number;
@@ -69,6 +95,7 @@ export function runGetInventory(items: InventoryItem[], args: unknown): Inventor
         location: i.location ?? null,
         liters: itemLiters(i),
         observations: i.observations ?? [],
+        water_safety: i.waterSafety ? WATER_SAFETY_LABEL[i.waterSafety] : null,
       })),
     totals: {
       water_liters: t.waterLiters,

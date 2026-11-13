@@ -132,6 +132,10 @@ export function LocationTracker() {
       ctx.shadowBlur = 10;
       ctx.shadowColor = '#f43f5e';
       ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.font = '9px monospace';
+      ctx.fillStyle = '#f43f5e';
+      ctx.fillText('Simulated radiation', centerX - 10, centerY + 76);
 
       animationFrameId = requestAnimationFrame(render);
     };
@@ -234,7 +238,7 @@ export function LocationTracker() {
                 <AlertTriangle className="w-3.5 h-3.5 text-echo-rose shrink-0" />
                 <span>{h.title}</span>
               </div>
-              <Badge variant="rose">DEMO THREAT</Badge>
+              <Badge variant="rose">SIMULATED THREAT</Badge>
             </div>
             <div className="text-[10px] text-echo-muted mt-0.5">
               {h.details}

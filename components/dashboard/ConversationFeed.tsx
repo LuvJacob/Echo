@@ -5,6 +5,7 @@ import { ChatMessage, EchoAction, AvatarStatus } from '@/types/echo';
 import { Card, Button, Badge } from '@/components/ui';
 import { Terminal, Send, Volume2, ShieldCheck, Sparkles, CheckCircle2 } from 'lucide-react';
 import { VoiceInputButton } from '@/components/voice/VoiceInputButton';
+import type { EchoVoice } from '@/hooks/useEchoVoice';
 
 interface ConversationFeedProps {
   messages: ChatMessage[];
@@ -15,6 +16,8 @@ interface ConversationFeedProps {
   onSendMessage: (text: string) => void;
   onPlaySpeech?: (text: string) => void;
   onAuthorizeAction?: (action: EchoAction) => void;
+  /** [Person B] Live voice session; when set, the mic button talks to ECHO directly. */
+  voice?: EchoVoice;
 }
 
 export function ConversationFeed({
@@ -26,6 +29,7 @@ export function ConversationFeed({
   onSendMessage,
   onPlaySpeech,
   onAuthorizeAction,
+  voice,
 }: ConversationFeedProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -44,7 +48,7 @@ export function ConversationFeed({
   const samplePrompts = [
     'How much water do I have?',
     'Scan +3 water bottles into inventory',
-    'Report radiation status in Sector 4',
+    'Report (simulated) radiation status in Sector 4',
     'Emergency water purification protocol',
   ];
 
@@ -94,7 +98,7 @@ export function ConversationFeed({
                   {isUser ? 'SURVIVOR [CALL-SIGN 01]' : 'ECHO ONBOARD AI'}
                 </span>
                 <span>•</span>
-                <span>{new Date(m.timestamp).toLocaleTimeString().split(' ')[0]}</span>
+                <span suppressHydrationWarning>{m.timestamp ? new Date(m.timestamp).toLocaleTimeString().split(' ')[0] : ''}</span>
               </div>
 
               {/* Message Bubble */}
@@ -165,9 +169,10 @@ export function ConversationFeed({
       {/* Input Bar Form */}
       <form onSubmit={handleSubmit} className="pt-3 border-t border-echo-border flex gap-2 items-center">
         <VoiceInputButton
+          voice={voice}
           onTranscript={(text) => onSendMessage(text)}
           status={avatarStatus}
-          disabled={isLoading}
+          disabled={!voice && isLoading}
         />
 
         <input

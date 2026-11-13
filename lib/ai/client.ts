@@ -1,12 +1,14 @@
 import type { ChatMessage, EchoAction, InventoryItem } from '@/types/echo';
 import { ECHO_SYSTEM_PROMPT } from './prompts';
 import { ECHO_TOOLS, parseToolArgs, runGetInventory } from './tools';
+import { DEFAULT_LOCATION, fetchWeather, type GeoPoint } from './weather';
 import { MODELS, createResponse, getOpenAIKey, outputText, type ResponseOutputItem } from './openai';
 
 export interface AiChatParams {
   message: string;
   history?: ChatMessage[];
   inventory?: InventoryItem[];
+  location?: { latitude: number; longitude: number };
 }
 
 export interface AiChatResult {
@@ -53,12 +55,23 @@ export async function generateChatResponse(params: AiChatParams): Promise<AiChat
     input.push(...resp.output);
     for (const c of calls) {
       toolCalls.push(c.name ?? 'unknown');
-      const output = c.name === 'get_inventory' ? runGetInventory(inventory, parseToolArgs(c.arguments)) : { error: 'unknown tool' };
+      const output =
+        c.name === 'get_inventory'
+          ? runGetInventory(inventory, parseToolArgs(c.arguments))
+          : c.name === 'get_weather'
+            ? await fetchWeather(toGeo(params.location))
+            : { error: 'unknown tool' };
       input.push({ type: 'function_call_output', call_id: c.call_id, output: JSON.stringify(output) });
     }
   }
   const reply = 'Inventory lookup timed out. Try again.';
   return { reply, speechText: reply, toolCalls, mock: false };
+}
+
+function toGeo(l?: { latitude: number; longitude: number }): GeoPoint {
+  return l && Number.isFinite(l.latitude) && Number.isFinite(l.longitude)
+    ? { latitude: l.latitude, longitude: l.longitude, label: "the survivor's current location" }
+    : DEFAULT_LOCATION;
 }
 
 /** Deterministic offline replies. Still answers from the real persisted snapshot via the same tool. */

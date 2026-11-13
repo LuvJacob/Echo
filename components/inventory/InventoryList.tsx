@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { InventoryItem, InventorySummary, ItemCategory } from '@/types/echo';
+import { InventoryItem, InventorySummary, ItemCategory, CATEGORY_LABEL, WATER_SAFETY_LABEL } from '@/types/echo';
 import { Card, Badge, Button } from '@/components/ui';
 import {
   Package,
@@ -66,8 +66,8 @@ export function InventoryList({
   const categories = [
     { id: 'all', label: 'ALL' },
     { id: 'water', label: 'WATER' },
-    { id: 'food', label: 'FOOD' },
-    { id: 'medical', label: 'MEDS' },
+    { id: 'food', label: 'RATIONS' },
+    { id: 'medical', label: 'MEDICAL' },
     { id: 'tool', label: 'TOOLS' },
   ];
 
@@ -173,7 +173,7 @@ export function InventoryList({
                     {item.name}
                   </div>
                   <div className="text-[10px] font-mono text-echo-muted flex items-center space-x-2 mt-0.5">
-                    <span className="uppercase font-semibold text-echo-text/70">{item.category}</span>
+                    <span className="uppercase font-semibold text-echo-text/70">{CATEGORY_LABEL[item.category] ?? item.category}</span>
                     <span>•</span>
                     <span className="text-echo-cyan/80">via {item.source}</span>
                     {item.notes && (
@@ -183,6 +183,19 @@ export function InventoryList({
                       </>
                     )}
                   </div>
+                  {item.waterSafety && (
+                    <span
+                      className={`inline-block mt-1 px-1.5 py-0.5 rounded border text-[9px] font-mono ${
+                        item.waterSafety === 'possible_contamination'
+                          ? 'border-echo-rose/50 bg-echo-rose/10 text-echo-rose'
+                          : item.waterSafety === 'safety_unknown'
+                            ? 'border-echo-amber/50 bg-echo-amber/10 text-echo-amber'
+                            : 'border-echo-emerald/50 bg-echo-emerald/10 text-echo-emerald'
+                      }`}
+                    >
+                      {WATER_SAFETY_LABEL[item.waterSafety]}
+                    </span>
+                  )}
                 </div>
               </div>
 

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AvatarStatus, EchoError, EchoErrorCode, ChatApiResponse } from '@/types/echo';
 import { InventoryService } from '@/lib/inventory/service';
 import { parseToolArgs, runGetInventory } from '@/lib/ai/tools';
+import { fetchWeather, getBrowserLocation } from '@/lib/ai/weather';
+import { answerSealQuestion } from '@/lib/inventory/sealQuestion';
 import { generateId } from '@/lib/utils';
 
 /**
@@ -60,6 +62,10 @@ export interface EchoVoice {
   sendText: (text: string) => Promise<void>;
   /** Give ECHO context (e.g. "photo scan proposed 3 bottles"); optionally have it respond aloud. */
   notify: (text: string, opts?: { respond?: boolean }) => void;
+  /** ECHO speaks this exact short line (e.g. "Water bottle added."). Queued if ECHO is mid-reply. */
+  say: (text: string) => void;
+  /** ECHO asks this question in-conversation (so it understands the spoken answer). `context` is hidden guidance. */
+  ask: (question: string, context?: string) => void;
   /** Retry audio after an autoplay block ('playback_failed'). Call from a tap. */
   resumePlayback: () => Promise<void>;
   clearError: () => void;
@@ -114,6 +120,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const holdStartRef = useRef(0);
+  const releasedRef = useRef(true); // true once the user lets go (even mid-connect)
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -122,6 +129,8 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
   const synthAmpRef = useRef<number | null>(null); // browser-TTS simulated amplitude
   const connectingRef = useRef<Promise<void> | null>(null);
   const handledCalls = useRef(new Set<string>());
+  const responseActiveRef = useRef(false);
+  const sayQueueRef = useRef<string[]>([]);
 
   const setStatus = useCallback((s: VoiceStatus) => {
     statusRef.current = s;
@@ -245,12 +254,27 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
     if (dc && dc.readyState === 'open') dc.send(JSON.stringify(evt));
   }, []);
 
+  /** Out-of-band response: spoken but not added to the conversation history. */
+  const sendSay = (text: string) => {
+    responseActiveRef.current = true;
+    sendEvent({
+      type: 'response.create',
+      response: {
+        conversation: 'none',
+        output_modalities: ['audio'],
+        instructions: `Say exactly this, in your normal voice, and nothing else: "${text.replace(/"/g, "'")}"`,
+      },
+    });
+  };
+
   const handleRealtimeEvent = useCallback(
     (evt: Record<string, any>) => {
       switch (evt.type) {
-        case 'conversation.item.input_audio_transcription.delta':
-          upsertCaption(evt.item_id, 'user', evt.delta ?? '', false, true);
+        case 'conversation.item.input_audio_transcription.delta': {
+          const prev = captionsRef.current.find((c) => c.id === evt.item_id)?.text ?? '';
+          upsertCaption(evt.item_id, 'user', (prev === '…' ? '' : prev) + (evt.delta ?? ''), false);
           break;
+        }
         case 'conversation.item.input_audio_transcription.completed':
           upsertCaption(evt.item_id, 'user', evt.transcript ?? '', true);
           break;
@@ -262,7 +286,12 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
         case 'response.audio_transcript.done':
           upsertCaption(evt.item_id, 'assistant', evt.transcript ?? '', true);
           break;
+        case 'input_audio_buffer.committed':
+          // Placeholder so the user's line sits ABOVE ECHO's reply even if transcription arrives late.
+          if (evt.item_id) upsertCaption(evt.item_id, 'user', '…', false);
+          break;
         case 'response.created':
+          responseActiveRef.current = true;
           if (statusRef.current !== 'listening') setStatus('thinking');
           break;
         case 'output_audio_buffer.started':
@@ -273,23 +302,31 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
           if (statusRef.current === 'speaking') setStatus('ready');
           break;
         case 'response.done': {
+          responseActiveRef.current = false;
+          const queued = sayQueueRef.current.shift();
+          if (queued) sendSay(queued);
           const output: any[] = evt.response?.output ?? [];
           const calls = output.filter((o) => o.type === 'function_call' && !handledCalls.current.has(o.call_id));
           if (calls.length) {
-            for (const c of calls) {
-              handledCalls.current.add(c.call_id);
-              // Tool reads the PERSISTED store right now — this is what makes fresh-session recall work.
-              const result =
-                c.name === 'get_inventory'
-                  ? runGetInventory(InventoryService.list(), parseToolArgs(c.arguments))
-                  : { error: `Unknown tool ${c.name}` };
-              sendEvent({
-                type: 'conversation.item.create',
-                item: { type: 'function_call_output', call_id: c.call_id, output: JSON.stringify(result) },
-              });
-            }
-            sendEvent({ type: 'response.create' });
             setStatus('thinking');
+            calls.forEach((c) => handledCalls.current.add(c.call_id));
+            void Promise.all(
+              calls.map(async (c) => {
+                // Inventory tool reads the PERSISTED store right now — this makes fresh-session recall work.
+                const result =
+                  c.name === 'get_inventory'
+                    ? runGetInventory(InventoryService.list(), parseToolArgs(c.arguments))
+                    : c.name === 'get_weather'
+                      ? await fetchWeather(await getBrowserLocation())
+                      : c.name === 'set_water_sealed'
+                        ? answerSealQuestion(parseToolArgs(c.arguments))
+                        : { error: `Unknown tool ${c.name}` };
+                sendEvent({
+                  type: 'conversation.item.create',
+                  item: { type: 'function_call_output', call_id: c.call_id, output: JSON.stringify(result) },
+                });
+              })
+            ).then(() => sendEvent({ type: 'response.create' }));
           } else if (evt.response?.status === 'failed') {
             fail(err('provider_error', evt.response?.status_details?.error?.message ?? 'ECHO could not answer. Try again.'));
           } else if (statusRef.current === 'thinking') {
@@ -300,6 +337,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
         }
         case 'error': {
           const msg: string = evt.error?.message ?? 'Realtime error';
+          if (/cancel|no active response|not active/i.test(msg)) break; // harmless barge-in race
           if (/buffer too small|buffer is empty/i.test(msg)) {
             if (statusRef.current === 'thinking') setStatus('ready');
             break; // a too-short press; not worth surfacing
@@ -366,7 +404,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
       void playElement(el);
     };
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+      if (pc.connectionState === 'failed') {
         if (pcRef.current === pc) fail(err('connection_failed', 'Voice link dropped. Press talk to reconnect.'), true);
       }
     };
@@ -413,6 +451,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
     if (statusRef.current !== 'disconnected' && statusRef.current !== 'error') return;
 
     const run = (async () => {
+      teardown(); // drop any dead peer connection before reconnecting
       setError(null);
       setStatus('connecting');
       ensureAudio(); // inside the user gesture → unlocks autoplay
@@ -559,15 +598,18 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
 
   // ---------- push-to-talk ----------
   const startTalking = useCallback(async () => {
+    releasedRef.current = false;
     if (statusRef.current === 'disconnected' || statusRef.current === 'error') await connect();
     if (statusRef.current === 'disconnected' || statusRef.current === 'error') return;
+    // Released while connecting / answering the mic permission prompt → don't open the mic.
+    if (releasedRef.current) return;
     setError(null);
     holdStartRef.current = performance.now();
 
     if (modeRef.current === 'realtime') {
       // barge-in: stop ECHO talking
       if (statusRef.current === 'speaking' || statusRef.current === 'thinking') {
-        sendEvent({ type: 'response.cancel' });
+        if (responseActiveRef.current) sendEvent({ type: 'response.cancel' });
         sendEvent({ type: 'output_audio_buffer.clear' });
       }
       sendEvent({ type: 'input_audio_buffer.clear' });
@@ -583,6 +625,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
     try {
       const mic = await getMic();
       const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((m) => MediaRecorder.isTypeSupported?.(m));
+      if (releasedRef.current) return; // let go during the permission prompt
       const rec = new MediaRecorder(mic, mime ? { mimeType: mime } : undefined);
       chunksRef.current = [];
       rec.ondataavailable = (e) => e.data.size && chunksRef.current.push(e.data);
@@ -596,6 +639,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
   }, [connect, fail, getMic, sendEvent, setStatus]);
 
   const stopTalking = useCallback(() => {
+    releasedRef.current = true;
     if (!isMicHeldRef(recorderRef, micRef, modeRef)) return;
     const held = performance.now() - holdStartRef.current;
     setMicHeld(false);
@@ -657,7 +701,7 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
       setError(null);
       if (modeRef.current === 'realtime' && dcRef.current?.readyState === 'open') {
         if (statusRef.current === 'speaking' || statusRef.current === 'thinking') {
-          sendEvent({ type: 'response.cancel' });
+          if (responseActiveRef.current) sendEvent({ type: 'response.cancel' });
           sendEvent({ type: 'output_audio_buffer.clear' });
         }
         const id = generateId('cap');
@@ -686,6 +730,45 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
       }
     },
     [pipelineTurn, sendEvent, setStatus]
+  );
+
+  const ask = useCallback(
+    async (question: string, context?: string) => {
+      if (statusRef.current === 'disconnected' || statusRef.current === 'error') await connect();
+      if (modeRef.current === 'realtime' && dcRef.current?.readyState === 'open') {
+        if (context) {
+          sendEvent({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: context }] } });
+        }
+        if (responseActiveRef.current) sendEvent({ type: 'response.cancel' });
+        responseActiveRef.current = true;
+        sendEvent({
+          type: 'response.create',
+          response: { instructions: `Say exactly this and nothing else: "${question.replace(/"/g, "'")}"` },
+        });
+        return;
+      }
+      upsertCaption(generateId('cap'), 'assistant', question, true);
+      void speakPipeline(question);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [connect, speakPipeline, upsertCaption]
+  );
+
+  const say = useCallback(
+    async (text: string) => {
+      // Connect the live session first so confirmations use ECHO's real voice.
+      if (statusRef.current === 'disconnected' || statusRef.current === 'error') await connect();
+      if (modeRef.current === 'realtime' && dcRef.current?.readyState === 'open') {
+        if (responseActiveRef.current || statusRef.current === 'listening') sayQueueRef.current.push(text);
+        else sendSay(text);
+        return;
+      }
+      // Pipeline or not connected yet: server TTS (falls back to browser speech).
+      upsertCaption(generateId('cap'), 'assistant', text, true);
+      void speakPipeline(text);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [connect, speakPipeline, upsertCaption]
   );
 
   const resumePlayback = useCallback(async () => {
@@ -725,10 +808,12 @@ export function useEchoVoice(options: UseEchoVoiceOptions = {}): EchoVoice {
       stopTalking,
       sendText,
       notify,
+      say,
+      ask,
       resumePlayback,
       clearError,
     }),
-    [mode, status, captions, error, amplitude, getAmplitude, playbackStream, audioElement, isMicHeld, connect, disconnect, startTalking, stopTalking, sendText, notify, resumePlayback, clearError]
+    [mode, status, captions, error, amplitude, getAmplitude, playbackStream, audioElement, isMicHeld, connect, disconnect, startTalking, stopTalking, sendText, notify, say, ask, resumePlayback, clearError]
   );
 }
 

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { MODELS, ProviderError, createRealtimeClientSecret, getOpenAIKey } from '@/lib/ai/openai';
 import { ECHO_SYSTEM_PROMPT } from '@/lib/ai/prompts';
-import { ECHO_TOOLS } from '@/lib/ai/tools';
+import { REALTIME_TOOLS } from '@/lib/ai/tools';
 
 export const runtime = 'nodejs';
 
@@ -31,7 +31,7 @@ export async function POST() {
         },
         output: { voice: MODELS.realtimeVoice },
       },
-      tools: ECHO_TOOLS,
+      tools: REALTIME_TOOLS,
       tool_choice: 'auto',
     });
     return NextResponse.json({ success: true, clientSecret: secret.value, expiresAt: secret.expires_at, model: MODELS.realtime });

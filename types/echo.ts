@@ -61,6 +61,22 @@ export type ItemCategory =
 
 export type ItemSource = 'manual' | 'vision_scan' | 'voice_prompt' | 'system_seed';
 
+/** [Person B] Simple drinking recommendation for water. */
+export type WaterSafety = 'possible_contamination' | 'safety_unknown' | 'preferred';
+
+export const WATER_SAFETY_LABEL: Record<WaterSafety, string> = {
+  possible_contamination: 'Possible contamination — don\'t drink',
+  safety_unknown: 'Safety unknown',
+  preferred: 'Preferred for drinking',
+};
+
+/** [Person B] Display names for categories used in the UI and spoken confirmations. */
+export const CATEGORY_LABEL: Partial<Record<ItemCategory, string>> = {
+  water: 'Water',
+  food: 'Rations',
+  medical: 'Medical supplies',
+};
+
 /** How full a container is. Unset (undefined) means "not confirmed by the user". */
 export type FillLevel = 'full' | 'three_quarters' | 'half' | 'quarter' | 'empty';
 
@@ -81,8 +97,10 @@ export interface InventoryItem {
   fillLevel?: FillLevel;
   /** [Person B, additive] Free-text storage location, e.g. "locker seven". */
   location?: string;
-  /** [Person B, additive] Visual observations (e.g. "liquid looks green"). Never a safety verdict. */
+  /** [Person B, additive] Visual observations (e.g. "liquid looks green"). */
   observations?: string[];
+  /** [Person B, additive] Drinking recommendation for water items. */
+  waterSafety?: WaterSafety;
 }
 
 export interface InventorySummary {
