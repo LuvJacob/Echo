@@ -1,6 +1,10 @@
 # ECHO: AI Survival Companion
 
-**HackPerimeter 2026 ▲ Escape From Earth**
+**🥈 2nd Place — HackPerimeter 2026 ▲ Escape From Earth**
+
+▶️ **[Watch the demo video](https://youtu.be/Gy_iCE8PVhM)**: ECHO hears you, talks back, scans supplies live, and flags contaminated water.
+
+[![ECHO demo video](https://img.youtube.com/vi/Gy_iCE8PVhM/maxresdefault.jpg)](https://youtu.be/Gy_iCE8PVhM)
 
 > *Earth is finished. You are not.* You're the last one left, with no crew and no signal, just the supplies you can carry. **ECHO** is a voice-first AI companion that **hears** you, **speaks** back, **sees** your supplies through the camera, and **remembers** what you have.
 
