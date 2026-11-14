@@ -46,6 +46,103 @@ const inputCls =
   'w-full bg-echo-bg border border-echo-border rounded-md px-2 py-1.5 text-base sm:text-xs font-mono text-white focus:outline-none focus:border-echo-cyan';
 const labelCls = 'block text-[10px] font-mono text-echo-muted uppercase mb-1';
 
+function generatePresetImageDataUrl(preset: 'water' | 'mre' | 'medical' | 'discolored'): string {
+  if (typeof document === 'undefined') return '';
+  const canvas = document.createElement('canvas');
+  canvas.width = 640;
+  canvas.height = 480;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return '';
+
+  // Background
+  ctx.fillStyle = '#0a101d';
+  ctx.fillRect(0, 0, 640, 480);
+
+  // Tactical Grid
+  ctx.strokeStyle = '#1e293b';
+  ctx.lineWidth = 1;
+  for (let x = 0; x < 640; x += 40) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, 480);
+    ctx.stroke();
+  }
+  for (let y = 0; y < 480; y += 40) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(640, y);
+    ctx.stroke();
+  }
+
+  // Draw preset items
+  if (preset === 'water') {
+    [100, 260, 420].forEach((x) => {
+      // Bottle Body
+      ctx.fillStyle = '#0284c7';
+      ctx.beginPath();
+      ctx.roundRect(x, 140, 110, 240, [15, 15, 10, 10]);
+      ctx.fill();
+      // Cap
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillRect(x + 35, 100, 40, 40);
+      // Label
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(x + 15, 200, 80, 80);
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 12px monospace';
+      ctx.fillText('WATER', x + 25, 230);
+      ctx.fillText('500 mL', x + 22, 255);
+    });
+    ctx.fillStyle = '#00e5ff';
+    ctx.font = 'bold 18px monospace';
+    ctx.fillText('SUPPLY SCAN FIXTURE: 3x WATER BOTTLES 500ML', 70, 50);
+  } else if (preset === 'mre') {
+    [120, 340].forEach((x) => {
+      ctx.fillStyle = '#78350f';
+      ctx.beginPath();
+      ctx.roundRect(x, 140, 170, 240, 12);
+      ctx.fill();
+      ctx.fillStyle = '#fef3c7';
+      ctx.font = 'bold 14px monospace';
+      ctx.fillText('MRE RATION PACK', x + 20, 220);
+      ctx.fillText('1,200 KCAL', x + 35, 250);
+      ctx.fillText('SEALED', x + 50, 280);
+    });
+    ctx.fillStyle = '#fbbf24';
+    ctx.font = 'bold 18px monospace';
+    ctx.fillText('SUPPLY SCAN FIXTURE: 2x MRE RATION PACKS', 90, 50);
+  } else if (preset === 'medical') {
+    ctx.fillStyle = '#dc2626';
+    ctx.beginPath();
+    ctx.roundRect(170, 120, 300, 260, 18);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(295, 170, 50, 160);
+    ctx.fillRect(240, 225, 160, 50);
+    ctx.font = 'bold 16px monospace';
+    ctx.fillText('EMERGENCY FIRST-AID KIT', 195, 355);
+    ctx.fillStyle = '#f87171';
+    ctx.font = 'bold 18px monospace';
+    ctx.fillText('SUPPLY SCAN FIXTURE: 1x EMERGENCY TRAUMA KIT', 70, 50);
+  } else if (preset === 'discolored') {
+    ctx.fillStyle = '#15803d';
+    ctx.beginPath();
+    ctx.roundRect(260, 130, 120, 260, [20, 20, 10, 10]);
+    ctx.fill();
+    ctx.fillStyle = '#4ade80';
+    ctx.fillRect(295, 90, 50, 40);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText('SUSPECT FLUID', 265, 240);
+    ctx.fillText('GREEN TINT', 275, 265);
+    ctx.fillStyle = '#22c55e';
+    ctx.font = 'bold 18px monospace';
+    ctx.fillText('WARNING: UNVERIFIED FLUID SAMPLE (DISCOLORED)', 70, 50);
+  }
+
+  return canvas.toDataURL('image/jpeg', 0.85);
+}
+
 export function PhotoUploadModal({ isOpen, onClose, scan, onLiveAdded, voiceListening, voiceCaption, onLiveUnknown }: PhotoUploadModalProps) {
   const cameraRef = useRef<HTMLInputElement | null>(null);
   const uploadRef = useRef<HTMLInputElement | null>(null);
@@ -252,6 +349,66 @@ export function PhotoUploadModal({ isOpen, onClose, scan, onLiveAdded, voiceList
                   <Upload className="w-4 h-4 mr-1.5" />
                   Upload image
                 </Button>
+              </div>
+
+              {/* Demo Sample Fixtures */}
+              <div className="pt-3 border-t border-echo-border/60">
+                <span className="block text-[10px] font-mono text-echo-muted uppercase mb-2">
+                  Or test with verified demo photo fixtures:
+                </span>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirmError(null);
+                      const url = generatePresetImageDataUrl('water');
+                      void scan.scanPhoto(url);
+                    }}
+                    className="p-2 rounded-lg border border-echo-border bg-echo-bg/60 hover:border-echo-cyan/60 hover:bg-echo-cyan/10 text-left text-xs font-mono transition-colors"
+                  >
+                    <div className="font-bold text-echo-cyan text-[11px]">3x Water Bottles</div>
+                    <div className="text-[9px] text-echo-muted">500 mL sealed</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirmError(null);
+                      const url = generatePresetImageDataUrl('mre');
+                      void scan.scanPhoto(url);
+                    }}
+                    className="p-2 rounded-lg border border-echo-border bg-echo-bg/60 hover:border-echo-amber/60 hover:bg-echo-amber/10 text-left text-xs font-mono transition-colors"
+                  >
+                    <div className="font-bold text-echo-amber text-[11px]">2x MRE Rations</div>
+                    <div className="text-[9px] text-echo-muted">1,200 kcal pack</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirmError(null);
+                      const url = generatePresetImageDataUrl('medical');
+                      void scan.scanPhoto(url);
+                    }}
+                    className="p-2 rounded-lg border border-echo-border bg-echo-bg/60 hover:border-echo-rose/60 hover:bg-echo-rose/10 text-left text-xs font-mono transition-colors"
+                  >
+                    <div className="font-bold text-echo-rose text-[11px]">1x Trauma Kit</div>
+                    <div className="text-[9px] text-echo-muted">First-aid supplies</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirmError(null);
+                      const url = generatePresetImageDataUrl('discolored');
+                      void scan.scanPhoto(url);
+                    }}
+                    className="p-2 rounded-lg border border-echo-border bg-echo-bg/60 hover:border-echo-emerald/60 hover:bg-echo-emerald/10 text-left text-xs font-mono transition-colors"
+                  >
+                    <div className="font-bold text-emerald-400 text-[11px]">Suspect Fluid</div>
+                    <div className="text-[9px] text-echo-muted">Flagged green tint</div>
+                  </button>
+                </div>
               </div>
             </div>
           </div>

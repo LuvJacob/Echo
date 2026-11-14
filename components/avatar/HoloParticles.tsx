@@ -18,7 +18,7 @@ export function HoloParticles({ status, primaryColor }: HoloParticlesProps) {
     if (!ctx) return;
 
     let animationFrameId: number;
-    const count = status === 'thinking' ? 36 : status === 'speaking' ? 28 : 18;
+    const count = status === 'thinking' ? 48 : status === 'speaking' ? 36 : 24;
     const particles: Array<{
       x: number;
       y: number;
@@ -29,27 +29,28 @@ export function HoloParticles({ status, primaryColor }: HoloParticlesProps) {
       pulseSpeed: number;
     }> = [];
 
-    const width = (canvas.width = 300);
-    const height = (canvas.height = 300);
-    const centerX = width / 2;
-    const centerY = height / 2;
+    const size = 520;
+    canvas.width = size;
+    canvas.height = size;
+    const centerX = size / 2;
+    const centerY = size / 2 - 10;
 
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
-      const dist = 40 + Math.random() * 85;
+      const dist = 60 + Math.random() * 160;
       particles.push({
         x: centerX + Math.cos(angle) * dist,
         y: centerY + Math.sin(angle) * dist,
-        radius: 1 + Math.random() * 2,
-        vx: (Math.random() - 0.5) * (status === 'thinking' ? 1.5 : 0.6),
-        vy: (Math.random() - 0.5) * (status === 'thinking' ? 1.5 : 0.6),
+        radius: 1 + Math.random() * 2.2,
+        vx: (Math.random() - 0.5) * (status === 'thinking' ? 1.8 : 0.7),
+        vy: (Math.random() - 0.5) * (status === 'thinking' ? 1.8 : 0.7),
         alpha: 0.2 + Math.random() * 0.7,
         pulseSpeed: 0.02 + Math.random() * 0.04,
       });
     }
 
     const render = () => {
-      ctx.clearRect(0, 0, width, height);
+      ctx.clearRect(0, 0, size, size);
 
       particles.forEach((p) => {
         p.x += p.vx;
@@ -60,7 +61,7 @@ export function HoloParticles({ status, primaryColor }: HoloParticlesProps) {
         const dy = p.y - centerY;
         const dist = Math.sqrt(dx * dx + dy * dy);
 
-        if (dist > 130 || dist < 30) {
+        if (dist > 220 || dist < 40) {
           p.vx = -p.vx;
           p.vy = -p.vy;
         }
@@ -68,8 +69,8 @@ export function HoloParticles({ status, primaryColor }: HoloParticlesProps) {
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
         ctx.fillStyle = primaryColor;
-        ctx.globalAlpha = Math.max(0.1, Math.min(0.9, p.alpha));
-        ctx.shadowBlur = 8;
+        ctx.globalAlpha = Math.max(0.08, Math.min(0.85, p.alpha));
+        ctx.shadowBlur = 10;
         ctx.shadowColor = primaryColor;
         ctx.fill();
       });
